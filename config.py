@@ -46,7 +46,7 @@ LOAD_PRETRAINED_BEFORE_PRETRAIN = None  # Path to pretrained encoder to load bef
 BATCH_SIZE = 32
 LEARNING_RATE = 1e-5
 NUM_EPOCHS = 10000
-DEVICE = 'cpu'  # or 'cuda'
+DEVICE = 'cuda'  # or 'cuda'
 
 # Logging
 LOG_INTERVAL = 10
