@@ -20,6 +20,7 @@ BOTTLENECK_TYPE = 'autoencoder'  # 'communication' or 'autoencoder'
 # Task Type
 TASK_TYPE = 'selection'  # 'reconstruction', 'selection', or 'puzzle_classification'
 NUM_DISTRACTORS = 1  # Number of distractor grids for selection task (actual number will be min(NUM_DISTRACTORS, total_grids-1))
+USE_INPUT_OUTPUT_PAIRS = True  # If True, train on input→output transformations (requires reconstruction or selection task)
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
 VOCAB_SIZE = 100  # Size of discrete symbol vocabulary

@@ -517,6 +517,13 @@
                             <option value="autoencoder">Autoencoder</option>
                         </select>
                     </div>
+                    <div class="config-group">
+                        <label for="useInputOutputPairs" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="useInputOutputPairs" onchange="markConfigDirty()">
+                            <span>Use Input→Output Pairs</span>
+                        </label>
+                        <span style="font-size: 11px; color: #6b7280;">(Train on ARC transformations)</span>
+                    </div>
                 </div>
             </div>
 
@@ -747,6 +754,7 @@
                 document.getElementById('taskType').value = data.task_type;
                 document.getElementById('numDistractors').value = data.num_distractors;
                 document.getElementById('bottleneckType').value = data.bottleneck_type || 'communication';
+                document.getElementById('useInputOutputPairs').checked = data.use_input_output_pairs || false;
                 
                 // Data configuration
                 document.getElementById('maxGrids').value = data.max_grids || 0;
@@ -868,6 +876,7 @@
             const taskType = document.getElementById('taskType').value;
             const numDistractors = document.getElementById('numDistractors').value;
             const bottleneckType = document.getElementById('bottleneckType').value;
+            const useInputOutputPairs = document.getElementById('useInputOutputPairs').checked;
             
             // Data configuration
             const maxGrids = document.getElementById('maxGrids').value;
@@ -906,6 +915,7 @@
                     task_type: taskType,
                     num_distractors: parseInt(numDistractors),
                     bottleneck_type: bottleneckType,
+                    use_input_output_pairs: useInputOutputPairs,
                     max_grids: maxGrids ? parseInt(maxGrids) : null,
                     filter_grid_size: filterGridSize,
                     hidden_dim: parseInt(hiddenDim),
@@ -1000,12 +1010,20 @@
                 const accuracyColor = recon.accuracy > 80 ? '#10b981' : 
                                       recon.accuracy > 50 ? '#f59e0b' : '#ef4444';
                 
+                // Only show message if it exists (communication mode)
+                const messageHTML = recon.message ? `
+                    <div class="message-display" style="margin: 0; padding: 8px 12px; flex-shrink: 0;">
+                        Symbol Sequence: [${recon.message.join(', ')}]
+                    </div>
+                ` : '';
+                
                 resultDiv.innerHTML = `
-                    <div class="pair-header">
+                    <div class="pair-header" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                         <span class="pair-title">Sample ${idx + 1}</span>
                         <span class="accuracy-badge" style="background: ${accuracyColor}">
                             ${recon.accuracy.toFixed(1)}% Accurate
                         </span>
+                        ${messageHTML}
                     </div>
                     <div class="grids-container">
                         <div class="grid-wrapper">
@@ -1016,9 +1034,6 @@
                             <div class="grid-label">OUTPUT (${recon.output.length}×${recon.output[0].length})</div>
                             <div id="output-${idx}" style="text-align: center;"></div>
                         </div>
-                    </div>
-                    <div class="message-display">
-                        Message: [${recon.message.join(', ')}]
                     </div>
                 `;
                 
@@ -1042,6 +1057,13 @@
                 const selectionColor = sel.correct ? '#10b981' : '#ef4444';
                 const selectionText = sel.correct ? `✓ Correct (${sel.confidence.toFixed(1)}%)` : `✗ Incorrect (${sel.confidence.toFixed(1)}%)`;
                 
+                // Only show message if it exists (communication mode)
+                const messageHTML = sel.message ? `
+                    <div class="message-display" style="margin: 0; padding: 8px 12px; flex-shrink: 0;">
+                        Symbol Sequence: [${sel.message.join(', ')}]
+                    </div>
+                ` : '';
+                
                 let candidatesHTML = '';
                 sel.candidates.forEach((cand, cIdx) => {
                     const classes = ['candidate-item'];
@@ -1061,11 +1083,12 @@
                 });
                 
                 resultDiv.innerHTML = `
-                    <div class="pair-header">
+                    <div class="pair-header" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                         <span class="pair-title">Sample ${idx + 1}</span>
                         <span class="selection-badge" style="background: ${selectionColor}">
                             ${selectionText}
                         </span>
+                        ${messageHTML}
                     </div>
                     <div class="grid-wrapper" style="margin-bottom: 15px;">
                         <div class="grid-label">TARGET GRID (${sel.actual_size[0]}×${sel.actual_size[1]})</div>
@@ -1076,9 +1099,6 @@
                     </div>
                     <div class="candidates-container">
                         ${candidatesHTML}
-                    </div>
-                    <div class="message-display">
-                        Message: [${sel.message.join(', ')}]
                     </div>
                 `;
                 

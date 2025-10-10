@@ -26,6 +26,7 @@ training_state = {
     'task_type': getattr(config, 'TASK_TYPE', 'reconstruction'),
     'num_distractors': getattr(config, 'NUM_DISTRACTORS', 3),
     'bottleneck_type': getattr(config, 'BOTTLENECK_TYPE', 'communication'),
+    'use_input_output_pairs': getattr(config, 'USE_INPUT_OUTPUT_PAIRS', False),
     # Data configuration
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
@@ -246,8 +247,11 @@ def get_reconstructions(model, grids, sizes, device, num_samples=1):
         logits_list, _, messages = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
         recon = logits_list[0].argmax(dim=1).squeeze(0).cpu().numpy()
         
-        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
-        msg = message[0].cpu().tolist()
+        # Only get message if in communication mode
+        if training_state['bottleneck_type'] == 'communication' and messages is not None:
+            msg = messages[0].cpu().tolist()
+        else:
+            msg = None  # No message in autoencoder mode
         
         min_h = min(actual_h, recon.shape[0])
         min_w = min(actual_w, recon.shape[1])
@@ -266,7 +270,6 @@ def get_reconstructions(model, grids, sizes, device, num_samples=1):
     
     model.train()
     return reconstructions
-
 
 def get_classification_preview(model, grids, sizes, device):
     """Get classification preview data for visualization - rotates through different samples."""
@@ -291,21 +294,24 @@ def get_classification_preview(model, grids, sizes, device):
         pred_class = int(probs.argmax())
         
         # Get message
-        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
-
-        msg = message[0].cpu().tolist()
-        
+        if training_state['bottleneck_type'] == 'communication':
+                message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+                msg = message[0].cpu().tolist()
+        else:
+            msg = None  # No message in autoencoder mode
+            
         preview = [{
             'task_type': 'puzzle_classification',
             'input': input_grid.tolist(),
             'pred_class': pred_class,
-            'top_probs': probs.tolist()[:10],  # Show top 10 probabilities
+            'top_probs': probs.tolist()[:10],
             'message': msg,
             'actual_size': [int(actual_h), int(actual_w)]
         }]
-    
+        
     model.train()
     return preview
+
 
 
 def get_selections(model, batch_data, device, task_type):
@@ -346,9 +352,11 @@ def get_selections(model, batch_data, device, task_type):
         probs = torch.softmax(sel_logits, dim=0).cpu().numpy()
         pred_idx = sel_logits.argmax().item()
         
-        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
-
-        msg = message[0].cpu().tolist()
+        if training_state['bottleneck_type'] == 'communication':
+            message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+            msg = message[0].cpu().tolist()
+        else:
+            msg = None  # No message in autoencoder mode
         
         # Get all candidate grids
         candidates_data = []
@@ -811,6 +819,7 @@ def train_worker():
         task_type = training_state['task_type']
         num_distractors = training_state['num_distractors'] if task_type == 'selection' else 0
         track_puzzle_ids = task_type == 'puzzle_classification'
+        use_input_output_pairs = training_state.get('use_input_output_pairs', False)
         
         dataset = ARCDataset(  # or 'dataset' in train_worker
             config.DATA_PATH, 
@@ -818,7 +827,8 @@ def train_worker():
             filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
             max_grids=training_state['max_grids'],           # ✅ Read from training_state
             num_distractors=num_distractors,     # (or num_distractors in train_worker)
-            track_puzzle_ids=track_puzzle_ids
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
         )
         
         # For puzzle classification, get number of classes
@@ -840,7 +850,7 @@ def train_worker():
         if task_type == 'puzzle_classification':
             collate_fn_for_task = collate_fn_puzzle_classification
         else:
-            collate_fn_for_task = partial(collate_fn, num_distractors=num_distractors)
+            collate_fn_for_task = partial(collate_fn, num_distractors=num_distractors, use_input_output_pairs=use_input_output_pairs)
         
         train_loader = DataLoader(
             train_dataset,
@@ -1177,6 +1187,7 @@ def get_task_config():
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
+        'use_input_output_pairs': training_state['use_input_output_pairs'],
         # Data configuration
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
@@ -1215,6 +1226,8 @@ def set_task_config():
         training_state['num_distractors'] = int(data['num_distractors'])
     if 'bottleneck_type' in data:
         training_state['bottleneck_type'] = data['bottleneck_type']
+    if 'use_input_output_pairs' in data:
+        training_state['use_input_output_pairs'] = bool(data['use_input_output_pairs'])
     
     # Data configuration
     if 'max_grids' in data:
@@ -1261,6 +1274,7 @@ def set_task_config():
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
+        'use_input_output_pairs': training_state['use_input_output_pairs'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         'hidden_dim': training_state['hidden_dim'],

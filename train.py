@@ -49,7 +49,7 @@ def visualize_grid(grid, title="Grid"):
     print("└" + "─" * (grid.shape[1] * 2) + "┘")
 
 
-def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type='reconstruction'):
+def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type='reconstruction', use_input_output_pairs=False):
     """Show input grids, messages (if communication mode), and reconstructions/selections side by side."""
     model.eval()
     print("\n" + "="*80)
@@ -57,35 +57,62 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
         print("SELECTION VISUALIZATION")
     else:
         print("RECONSTRUCTION VISUALIZATION")
+    if use_input_output_pairs:
+        print("MODE: Input → Output pairs (training on actual ARC transformations)")
+    else:
+        print("MODE: Self-supervised (reconstructing/selecting same grid)")
     print("="*80)
     
     with torch.no_grad():
         for batch_data in dataloader:
-            # Unpack batch based on task type
-            if task_type == 'selection':
-                grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
-                grids = grids.to(device)
-                candidates_list = [c.to(device) for c in candidates_list]
-                target_indices = target_indices.to(device)
+            # Unpack batch based on task type and use_input_output_pairs
+            if use_input_output_pairs:
+                if task_type == 'selection':
+                    input_grids, input_sizes, output_grids, output_sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                    input_grids = input_grids.to(device)
+                    output_grids = output_grids.to(device)
+                    candidates_list = [c.to(device) for c in candidates_list]
+                    target_indices = target_indices.to(device)
+                else:  # reconstruction
+                    input_grids, input_sizes, output_grids, output_sizes = batch_data
+                    input_grids = input_grids.to(device)
+                    output_grids = output_grids.to(device)
+                    candidates_list = None
+                    target_indices = None
             else:
-                grids, sizes = batch_data
-                grids = grids.to(device)
-                candidates_list = None
-                target_indices = None
+                # Original behavior (self-supervised)
+                if task_type == 'selection':
+                    grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                    grids = grids.to(device)
+                    candidates_list = [c.to(device) for c in candidates_list]
+                    target_indices = target_indices.to(device)
+                    input_grids = grids
+                    input_sizes = sizes
+                else:
+                    grids, sizes = batch_data
+                    grids = grids.to(device)
+                    input_grids = grids
+                    input_sizes = sizes
             
-            for i in range(min(num_samples, len(grids))):
-                grid = grids[i]
-                actual_h, actual_w = sizes[i]
+            for i in range(min(num_samples, len(input_grids))):
+                grid = input_grids[i]
+                actual_h, actual_w = input_sizes[i]
                 
-                # Get the actual grid (without padding)
+                # Get the actual INPUT grid (without padding)
                 input_grid = grid[:actual_h, :actual_w].cpu().numpy()
                 
                 print(f"\n{'─'*80}")
                 print(f"SAMPLE {i+1}")
                 print(f"{'─'*80}")
                 
-                # Show input grid
-                visualize_grid(input_grid, f"TARGET GRID (Size: {actual_h}x{actual_w})")
+                # Show INPUT grid
+                visualize_grid(input_grid, f"INPUT GRID (Size: {actual_h}x{actual_w})")
+                
+                # If using input-output pairs, also show expected output
+                if use_input_output_pairs:
+                    output_h, output_w = output_sizes[i]
+                    expected_output = output_grids[i][:output_h, :output_w].cpu().numpy()
+                    visualize_grid(expected_output, f"EXPECTED OUTPUT (Size: {output_h}x{output_w})")
                 
                 if task_type == 'selection':
                     # Selection task
@@ -113,9 +140,16 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
                     probs = torch.softmax(sel_logits, dim=0).cpu().numpy()
                     pred_idx = sel_logits.argmax().item()
                     
-                    print(f"\n🎯 CANDIDATES ({len(candidates)} options):")
+                    # Determine sizes for candidates
+                    if use_input_output_pairs:
+                        # Candidates are output grids, so we need to show their actual sizes
+                        print(f"\n🎯 CANDIDATES ({len(candidates)} options) - selecting OUTPUT:")
+                    else:
+                        print(f"\n🎯 CANDIDATES ({len(candidates)} options):")
+                    
                     for c_idx in range(len(candidates)):
-                        cand_grid = candidates[c_idx][:actual_h, :actual_w].cpu().numpy()
+                        c_h, c_w = single_candidates_sizes[c_idx]
+                        cand_grid = candidates[c_idx][:c_h, :c_w].cpu().numpy()
                         is_target = "✓ TARGET" if c_idx == target_idx.item() else ""
                         is_predicted = "← SELECTED" if c_idx == pred_idx else ""
                         label = f"Candidate {c_idx} (prob: {probs[c_idx]:.2%}) {is_target} {is_predicted}"
@@ -145,14 +179,26 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
                     visualize_grid(recon, f"RECONSTRUCTION (Size: {recon.shape[0]}x{recon.shape[1]})")
                     
                     # Calculate accuracy for this sample
-                    min_h = min(actual_h, recon.shape[0])
-                    min_w = min(actual_w, recon.shape[1])
-                    correct_pixels = (input_grid[:min_h, :min_w] == recon[:min_h, :min_w]).sum()
-                    total_pixels = min_h * min_w
-                    accuracy = 100.0 * correct_pixels / total_pixels
-                    
-                    print(f"\n📊 METRICS:")
-                    print(f"   Pixel accuracy: {accuracy:.2f}% ({correct_pixels}/{total_pixels} correct)")
+                    if use_input_output_pairs:
+                        # Compare against expected output
+                        output_h, output_w = output_sizes[i]
+                        expected_output = output_grids[i][:output_h, :output_w].cpu().numpy()
+                        min_h = min(output_h, recon.shape[0])
+                        min_w = min(output_w, recon.shape[1])
+                        correct_pixels = (expected_output[:min_h, :min_w] == recon[:min_h, :min_w]).sum()
+                        total_pixels = min_h * min_w
+                        accuracy = 100.0 * correct_pixels / total_pixels
+                        print(f"\n📊 METRICS:")
+                        print(f"   Pixel accuracy (vs expected output): {accuracy:.2f}% ({correct_pixels}/{total_pixels} correct)")
+                    else:
+                        # Compare against input (self-supervised)
+                        min_h = min(actual_h, recon.shape[0])
+                        min_w = min(actual_w, recon.shape[1])
+                        correct_pixels = (input_grid[:min_h, :min_w] == recon[:min_h, :min_w]).sum()
+                        total_pixels = min_h * min_w
+                        accuracy = 100.0 * correct_pixels / total_pixels
+                        print(f"\n📊 METRICS:")
+                        print(f"   Pixel accuracy: {accuracy:.2f}% ({correct_pixels}/{total_pixels} correct)")
                 
             break  # Only show first batch
     
@@ -160,7 +206,7 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
     model.train()
 
 
-def train_epoch(model, dataloader, optimizer, criterion, device, temperature, plotter=None, task_type='reconstruction'):
+def train_epoch(model, dataloader, optimizer, criterion, device, temperature, plotter=None, task_type='reconstruction', use_input_output_pairs=False):
     model.train()
     total_loss = 0
     correct = 0
@@ -168,28 +214,49 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
     
     pbar = tqdm(dataloader, desc='Training')
     for batch_idx, batch_data in enumerate(pbar):
-        # Unpack batch based on task type
-        if task_type == 'selection':
-            grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
-            grids = grids.to(device)
-            candidates_list = [c.to(device) for c in candidates_list]
-            target_indices = target_indices.to(device)
-        elif task_type == 'puzzle_classification':
-            grids, sizes, labels = batch_data
-            grids = grids.to(device)
-            labels = labels.to(device)
+        # Unpack batch based on task type and use_input_output_pairs
+        if use_input_output_pairs:
+            if task_type == 'selection':
+                input_grids, input_sizes, output_grids, output_sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                input_grids = input_grids.to(device)
+                output_grids = output_grids.to(device)
+                candidates_list = [c.to(device) for c in candidates_list]
+                target_indices = target_indices.to(device)
+            else:  # reconstruction
+                input_grids, input_sizes, output_grids, output_sizes = batch_data
+                input_grids = input_grids.to(device)
+                output_grids = output_grids.to(device)
+                candidates_list = None
+                target_indices = None
         else:
-            grids, sizes = batch_data
-            grids = grids.to(device)
-            candidates_list = None
-            target_indices = None
+            # Original behavior (self-supervised)
+            if task_type == 'selection':
+                grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                grids = grids.to(device)
+                candidates_list = [c.to(device) for c in candidates_list]
+                target_indices = target_indices.to(device)
+                input_grids = grids
+                input_sizes = sizes
+            elif task_type == 'puzzle_classification':
+                grids, sizes, labels = batch_data
+                grids = grids.to(device)
+                labels = labels.to(device)
+                input_grids = grids
+                input_sizes = sizes
+            else:
+                grids, sizes = batch_data
+                grids = grids.to(device)
+                candidates_list = None
+                target_indices = None
+                input_grids = grids
+                input_sizes = sizes
         
         # Forward pass
         optimizer.zero_grad()
         
         if task_type == 'puzzle_classification':
-            # Puzzle classification task
-            classification_logits, _, messages = model(grids, sizes, temperature=temperature, labels=labels)
+            # Puzzle classification task (no I/O pairs)
+            classification_logits, _, messages = model(input_grids, input_sizes, temperature=temperature, labels=labels)
             
             # Compute classification loss
             loss = criterion(classification_logits, labels)
@@ -200,11 +267,20 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
             batch_total = labels.size(0)
         elif task_type == 'selection':
             # Selection task
-            selection_logits_list, actual_sizes, messages = model(
-                grids, sizes, temperature=temperature, 
-                candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
-                target_indices=target_indices
-            )
+            if use_input_output_pairs:
+                # Use input to generate message, select from candidates based on output
+                selection_logits_list, actual_sizes, messages = model(
+                    input_grids, input_sizes, temperature=temperature, 
+                    candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
+                    target_indices=target_indices
+                )
+            else:
+                # Original: select the same grid
+                selection_logits_list, actual_sizes, messages = model(
+                    input_grids, input_sizes, temperature=temperature, 
+                    candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
+                    target_indices=target_indices
+                )
             
             # Compute selection loss for each sample
             batch_loss = 0
@@ -223,31 +299,60 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
             loss = batch_loss / len(selection_logits_list)
         else:
             # Reconstruction task
-            logits_list, actual_sizes, messages = model(grids, sizes, temperature=temperature)
-            
-            # Compute reconstruction loss for each sample
-            batch_loss = 0
-            batch_correct = 0
-            batch_total = 0
-            
-            for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
-                actual_h, actual_w = sizes[sample_idx]
-                H, W = logits.shape[2], logits.shape[3]
+            if use_input_output_pairs:
+                # Use input to generate message, reconstruct output
+                logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=temperature)
                 
-                target_grid = grids[sample_idx:sample_idx+1, :H, :W]
+                # Compute reconstruction loss for each sample (target is OUTPUT)
+                batch_loss = 0
+                batch_correct = 0
+                batch_total = 0
                 
-                logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
-                targets_flat = target_grid.reshape(-1)
+                for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                    actual_h, actual_w = output_sizes[sample_idx]  # Use OUTPUT size
+                    H, W = logits.shape[2], logits.shape[3]
+                    
+                    target_grid = output_grids[sample_idx:sample_idx+1, :H, :W]  # Use OUTPUT grid
+                    
+                    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                    targets_flat = target_grid.reshape(-1)
+                    
+                    sample_loss = criterion(logits_flat, targets_flat)
+                    batch_loss += sample_loss
+                    
+                    pred = logits.argmax(dim=1).squeeze(0)
+                    target = target_grid.squeeze(0)
+                    batch_correct += (pred == target).sum().item()
+                    batch_total += target.numel()
                 
-                sample_loss = criterion(logits_flat, targets_flat)
-                batch_loss += sample_loss
+                loss = batch_loss / len(logits_list)
+            else:
+                # Original: reconstruct the same grid
+                logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=temperature)
                 
-                pred = logits.argmax(dim=1).squeeze(0)
-                target = target_grid.squeeze(0)
-                batch_correct += (pred == target).sum().item()
-                batch_total += target.numel()
-            
-            loss = batch_loss / len(logits_list)
+                # Compute reconstruction loss for each sample
+                batch_loss = 0
+                batch_correct = 0
+                batch_total = 0
+                
+                for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                    actual_h, actual_w = input_sizes[sample_idx]
+                    H, W = logits.shape[2], logits.shape[3]
+                    
+                    target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                    
+                    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                    targets_flat = target_grid.reshape(-1)
+                    
+                    sample_loss = criterion(logits_flat, targets_flat)
+                    batch_loss += sample_loss
+                    
+                    pred = logits.argmax(dim=1).squeeze(0)
+                    target = target_grid.squeeze(0)
+                    batch_correct += (pred == target).sum().item()
+                    batch_total += target.numel()
+                
+                loss = batch_loss / len(logits_list)
         
         # Backward pass
         loss.backward()
@@ -279,7 +384,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
     return total_loss / len(dataloader), 100. * correct / total if total > 0 else 0.0
 
 
-def validate(model, dataloader, criterion, device, task_type='reconstruction'):
+def validate(model, dataloader, criterion, device, task_type='reconstruction', use_input_output_pairs=False):
     model.eval()
     total_loss = 0
     correct = 0
@@ -287,26 +392,47 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction'):
     
     with torch.no_grad():
         for batch_data in tqdm(dataloader, desc='Validation'):
-            # Unpack batch based on task type
-            if task_type == 'selection':
-                grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
-                grids = grids.to(device)
-                candidates_list = [c.to(device) for c in candidates_list]
-                target_indices = target_indices.to(device)
-            elif task_type == 'puzzle_classification':
-                grids, sizes, labels = batch_data
-                grids = grids.to(device)
-                labels = labels.to(device)
+            # Unpack batch based on task type and use_input_output_pairs
+            if use_input_output_pairs:
+                if task_type == 'selection':
+                    input_grids, input_sizes, output_grids, output_sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                    input_grids = input_grids.to(device)
+                    output_grids = output_grids.to(device)
+                    candidates_list = [c.to(device) for c in candidates_list]
+                    target_indices = target_indices.to(device)
+                else:  # reconstruction
+                    input_grids, input_sizes, output_grids, output_sizes = batch_data
+                    input_grids = input_grids.to(device)
+                    output_grids = output_grids.to(device)
+                    candidates_list = None
+                    target_indices = None
             else:
-                grids, sizes = batch_data
-                grids = grids.to(device)
-                candidates_list = None
-                target_indices = None
+                # Original behavior (self-supervised)
+                if task_type == 'selection':
+                    grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                    grids = grids.to(device)
+                    candidates_list = [c.to(device) for c in candidates_list]
+                    target_indices = target_indices.to(device)
+                    input_grids = grids
+                    input_sizes = sizes
+                elif task_type == 'puzzle_classification':
+                    grids, sizes, labels = batch_data
+                    grids = grids.to(device)
+                    labels = labels.to(device)
+                    input_grids = grids
+                    input_sizes = sizes
+                else:
+                    grids, sizes = batch_data
+                    grids = grids.to(device)
+                    candidates_list = None
+                    target_indices = None
+                    input_grids = grids
+                    input_sizes = sizes
             
             # Forward pass
             if task_type == 'puzzle_classification':
                 # Puzzle classification task
-                classification_logits, _, messages = model(grids, sizes, temperature=1.0, labels=labels)
+                classification_logits, _, messages = model(input_grids, input_sizes, temperature=1.0, labels=labels)
                 
                 # Compute classification loss
                 loss = criterion(classification_logits, labels)
@@ -320,11 +446,18 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction'):
                 correct += batch_correct
                 total += batch_total
             elif task_type == 'selection':
-                selection_logits_list, actual_sizes, messages = model(
-                    grids, sizes, temperature=1.0,
-                    candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
-                    target_indices=target_indices
-                )
+                if use_input_output_pairs:
+                    selection_logits_list, actual_sizes, messages = model(
+                        input_grids, input_sizes, temperature=1.0,
+                        candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
+                        target_indices=target_indices
+                    )
+                else:
+                    selection_logits_list, actual_sizes, messages = model(
+                        input_grids, input_sizes, temperature=1.0,
+                        candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
+                        target_indices=target_indices
+                    )
                 
                 # Compute selection loss for each sample
                 batch_loss = 0
@@ -342,31 +475,60 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction'):
                 
                 loss = batch_loss / len(selection_logits_list)
             else:
-                logits_list, actual_sizes, messages = model(grids, sizes, temperature=1.0)
-                
-                # Compute reconstruction loss for each sample
-                batch_loss = 0
-                batch_correct = 0
-                batch_total = 0
-                
-                for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
-                    actual_h, actual_w = sizes[sample_idx]
-                    H, W = logits.shape[2], logits.shape[3]
+                if use_input_output_pairs:
+                    # Use input to generate message, reconstruct output
+                    logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=1.0)
                     
-                    target_grid = grids[sample_idx:sample_idx+1, :H, :W]
+                    # Compute reconstruction loss for each sample (target is OUTPUT)
+                    batch_loss = 0
+                    batch_correct = 0
+                    batch_total = 0
                     
-                    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
-                    targets_flat = target_grid.reshape(-1)
+                    for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                        actual_h, actual_w = output_sizes[sample_idx]  # Use OUTPUT size
+                        H, W = logits.shape[2], logits.shape[3]
+                        
+                        target_grid = output_grids[sample_idx:sample_idx+1, :H, :W]  # Use OUTPUT grid
+                        
+                        logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                        targets_flat = target_grid.reshape(-1)
+                        
+                        sample_loss = criterion(logits_flat, targets_flat)
+                        batch_loss += sample_loss
+                        
+                        pred = logits.argmax(dim=1).squeeze(0)
+                        target = target_grid.squeeze(0)
+                        batch_correct += (pred == target).sum().item()
+                        batch_total += target.numel()
                     
-                    sample_loss = criterion(logits_flat, targets_flat)
-                    batch_loss += sample_loss
+                    loss = batch_loss / len(logits_list)
+                else:
+                    # Original: reconstruct the same grid
+                    logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=1.0)
                     
-                    pred = logits.argmax(dim=1).squeeze(0)
-                    target = target_grid.squeeze(0)
-                    batch_correct += (pred == target).sum().item()
-                    batch_total += target.numel()
-                
-                loss = batch_loss / len(logits_list)
+                    # Compute reconstruction loss for each sample
+                    batch_loss = 0
+                    batch_correct = 0
+                    batch_total = 0
+                    
+                    for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                        actual_h, actual_w = input_sizes[sample_idx]
+                        H, W = logits.shape[2], logits.shape[3]
+                        
+                        target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                        
+                        logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                        targets_flat = target_grid.reshape(-1)
+                        
+                        sample_loss = criterion(logits_flat, targets_flat)
+                        batch_loss += sample_loss
+                        
+                        pred = logits.argmax(dim=1).squeeze(0)
+                        target = target_grid.squeeze(0)
+                        batch_correct += (pred == target).sum().item()
+                        batch_total += target.numel()
+                    
+                    loss = batch_loss / len(logits_list)
             
             total_loss += loss.item()
             correct += batch_correct
@@ -500,6 +662,7 @@ def main():
     task_type = getattr(config, 'TASK_TYPE', 'reconstruction')
     num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
     track_puzzle_ids = task_type == 'puzzle_classification'
+    use_input_output_pairs = getattr(config, 'USE_INPUT_OUTPUT_PAIRS', False)
     
     # Display bottleneck type and task type
     print(f'\n{"="*80}')
@@ -513,11 +676,17 @@ def main():
     print(f'\nTASK TYPE: {task_type.upper()}')
     if task_type == 'selection':
         print(f'  - Number of distractors: {num_distractors}')
-        print(f'  - Task: Sender → Message → Receiver selects from {num_distractors + 1} candidates')
+        if use_input_output_pairs:
+            print(f'  - Task: Sender sees INPUT → Message → Receiver selects OUTPUT from {num_distractors + 1} candidates')
+        else:
+            print(f'  - Task: Sender → Message → Receiver selects from {num_distractors + 1} candidates (self-supervised)')
     elif task_type == 'puzzle_classification':
         print(f'  - Task: Sender → Message → Receiver classifies puzzle category')
     else:
-        print(f'  - Task: Sender → Message → Receiver reconstructs grid')
+        if use_input_output_pairs:
+            print(f'  - Task: Sender sees INPUT → Message → Receiver reconstructs OUTPUT')
+        else:
+            print(f'  - Task: Sender → Message → Receiver reconstructs grid (self-supervised)')
     print(f'{"="*80}\n')
     
     # Load dataset
@@ -528,7 +697,8 @@ def main():
         filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
         max_grids=getattr(config, 'MAX_GRIDS', None),
         num_distractors=num_distractors,
-        track_puzzle_ids=track_puzzle_ids
+        track_puzzle_ids=track_puzzle_ids,
+        use_input_output_pairs=use_input_output_pairs
     )
     
     # For puzzle classification, get number of classes
@@ -553,7 +723,7 @@ def main():
     if task_type == 'puzzle_classification':
         collate_fn_for_task = collate_fn_puzzle_classification
     else:
-        collate_fn_for_task = partial(collate_fn, num_distractors=num_distractors)
+        collate_fn_for_task = partial(collate_fn, num_distractors=num_distractors, use_input_output_pairs=use_input_output_pairs)
     
     # Create dataloaders
     train_loader = DataLoader(
@@ -663,7 +833,7 @@ def main():
         print("\n🔍 INITIAL SELECTIONS (before training):")
     else:
         print("\n🔍 INITIAL RECONSTRUCTIONS (before training):")
-    visualize_reconstruction(model, val_loader, device, num_samples=2, task_type=task_type)
+    visualize_reconstruction(model, val_loader, device, num_samples=2, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
     
     try:
         for epoch in range(config.NUM_EPOCHS):
@@ -672,14 +842,14 @@ def main():
             # Train with live plotting
             train_loss, train_acc = train_epoch(
                 model, train_loader, optimizer, criterion, device, temperature,
-                plotter=plotter, task_type=task_type
+                plotter=plotter, task_type=task_type, use_input_output_pairs=use_input_output_pairs
             )
             
             # Mark epoch boundary on plot
             plotter.add_epoch_marker(epoch + 1)
             
             # Validate
-            val_loss, val_acc = validate(model, val_loader, criterion, device, task_type=task_type)
+            val_loss, val_acc = validate(model, val_loader, criterion, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
             
             # Update learning rate
             scheduler.step(val_loss)
@@ -690,7 +860,7 @@ def main():
             
             # Show reconstructions/selections every 5 epochs (or more frequently early on)
             if (epoch + 1) % 5 == 0 or epoch < 3:
-                visualize_reconstruction(model, val_loader, device, num_samples=3, task_type=task_type)
+                visualize_reconstruction(model, val_loader, device, num_samples=3, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
             
             # Show messages every 10 epochs (only in communication mode)
             if (epoch + 1) % 10 == 0:
@@ -730,7 +900,7 @@ def main():
             print("\n🎯 FINAL SELECTIONS:")
         else:
             print("\n🎯 FINAL RECONSTRUCTIONS:")
-        visualize_reconstruction(model, val_loader, device, num_samples=5, task_type=task_type)
+        visualize_reconstruction(model, val_loader, device, num_samples=5, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
         
         # Save final plot
         plotter.save(os.path.join(config.SAVE_DIR, 'training_progress.png'))
