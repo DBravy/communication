@@ -52,8 +52,24 @@
         }
         
         .task-config h3 {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
             color: #4c51bf;
+            font-size: 20px;
+        }
+        
+        .config-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .config-section-title {
+            margin-bottom: 12px;
+            color: #4c51bf;
+            font-size: 16px;
+            font-weight: 600;
         }
         
         .config-row {
@@ -72,6 +88,7 @@
         .config-group label {
             font-weight: 600;
             color: #4a5568;
+            white-space: nowrap;
         }
         
         select, input[type="number"] {
@@ -254,14 +271,28 @@
         .results-section {
             padding: 30px;
             background: white;
+            border-top: 2px solid #e9ecef;
         }
         
         .section-title {
             font-size: 24px;
             font-weight: 700;
             color: #1f2937;
-            margin-bottom: 20px;
+            margin-bottom: 30px;
             text-align: center;
+            position: relative;
+        }
+        
+        .section-title:after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 3px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
         }
         
         .results-grid {
@@ -393,11 +424,12 @@
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
             gap: 30px;
-            background: #f8f9fa;
+            background: white;
+            border-bottom: 2px solid #e9ecef;
         }
         
         .chart-container {
-            background: white;
+            background: #f8f9fa;
             border-radius: 8px;
             padding: 20px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -459,64 +491,135 @@
         </div>
         
         <div class="task-config">
-            <h3>Task Configuration</h3>
-            <div class="config-row">
-                <div class="config-group">
-                    <label for="taskType">Task Type:</label>
-                    <select id="taskType" onchange="markConfigDirty()">
-                        <option value="reconstruction">Reconstruction</option>
-                        <option value="selection">Selection</option>
-                        <option value="puzzle_classification">Puzzle Classification</option>
-                    </select>
-                </div>
-                <div class="config-group" id="distractorsGroup">
-                    <label for="numDistractors">Number of Distractors:</label>
-                    <input type="number" id="numDistractors" min="1" max="20" value="3" onchange="markConfigDirty()">
-                </div>
-                <div class="config-group">
-                    <label for="pretrainTaskType">Pretraining Task:</label>
-                    <select id="pretrainTaskType" onchange="markConfigDirty()">
-                        <option value="binary">Binary Classification</option>
-                        <option value="selection">Selection Task</option>
-                        <option value="puzzle_classification">Puzzle Classification</option>
-                    </select>
-                </div>
-                <div class="config-group">
-                    <label for="usePretrained" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="usePretrained" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
-                        Use Pretrained Encoder
-                    </label>
-                </div>
-                <div class="config-group">
-                    <label for="freezeEncoder" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                        <input type="checkbox" id="freezeEncoder" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
-                        Freeze Encoder Weights
-                    </label>
-                </div>
-                <div class="config-group">
-                    <button id="saveConfigBtn" onclick="saveTaskConfig()" style="padding: 8px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-                        💾 Save Configuration
-                    </button>
-                    <span id="configStatus" style="font-size: 12px; color: #6b7280; margin-left: 10px;"></span>
-                </div>
-            </div>
+            <h3>⚙️ Configuration Settings</h3>
             
-            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #d0d9ff;">
-                <h4 style="margin-bottom: 10px; color: #4c51bf;">🔄 Load Pretrained Encoder Before Pretraining</h4>
-                <p style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">
-                    Optional: Start pretraining from an existing pretrained encoder (e.g., pretrain on selection task after binary pretraining)
-                </p>
+            <!-- Task Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">🎯 Task Configuration</h4>
                 <div class="config-row">
                     <div class="config-group">
-                        <label for="loadPretrainedBefore">Load From:</label>
-                        <select id="loadPretrainedBefore" onchange="markConfigDirty()" style="min-width: 300px;">
+                        <label for="taskType">Task Type:</label>
+                        <select id="taskType" onchange="markConfigDirty()">
+                            <option value="reconstruction">Reconstruction</option>
+                            <option value="selection">Selection</option>
+                            <option value="puzzle_classification">Puzzle Classification</option>
+                        </select>
+                    </div>
+                    <div class="config-group" id="distractorsGroup">
+                        <label for="numDistractors">Number of Distractors:</label>
+                        <input type="number" id="numDistractors" min="1" max="20" value="3" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="bottleneckType">Bottleneck Type:</label>
+                        <select id="bottleneckType" onchange="markConfigDirty()">
+                            <option value="communication">Communication</option>
+                            <option value="autoencoder">Autoencoder</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Architecture -->
+            <div class="config-section">
+                <h4 class="config-section-title">🏗️ Model Architecture</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="hiddenDim">Hidden Dim:</label>
+                        <input type="number" id="hiddenDim" min="32" max="1024" step="32" value="128" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="latentDim">Latent Dim:</label>
+                        <input type="number" id="latentDim" min="32" max="1024" step="32" value="128" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="numConvLayers">Conv Layers:</label>
+                        <input type="number" id="numConvLayers" min="1" max="5" value="3" onchange="markConfigDirty()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Communication Protocol -->
+            <div class="config-section" id="commSection">
+                <h4 class="config-section-title">💬 Communication Protocol</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="vocabSize">Vocabulary Size:</label>
+                        <input type="number" id="vocabSize" min="2" max="1000" value="100" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="maxMessageLength">Max Message Length:</label>
+                        <input type="number" id="maxMessageLength" min="1" max="10" value="3" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="temperature">Temperature:</label>
+                        <input type="number" id="temperature" min="0.1" max="5" step="0.1" value="1.0" onchange="markConfigDirty()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training Hyperparameters -->
+            <div class="config-section">
+                <h4 class="config-section-title">📊 Training Hyperparameters</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="batchSize">Batch Size:</label>
+                        <input type="number" id="batchSize" min="1" max="256" value="32" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="learningRate">Learning Rate:</label>
+                        <input type="number" id="learningRate" min="0.000001" max="0.1" step="0.000001" value="0.00001" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="pretrainLearningRate">Pretrain LR:</label>
+                        <input type="number" id="pretrainLearningRate" min="0.000001" max="0.1" step="0.000001" value="0.0001" onchange="markConfigDirty()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pretraining Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">🔧 Pretraining Configuration</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="pretrainTaskType">Pretraining Task:</label>
+                        <select id="pretrainTaskType" onchange="markConfigDirty()">
+                            <option value="binary">Binary Classification</option>
+                            <option value="selection">Selection Task</option>
+                            <option value="puzzle_classification">Puzzle Classification</option>
+                        </select>
+                    </div>
+                    <div class="config-group">
+                        <label for="usePretrained" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="usePretrained" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                            Use Pretrained Encoder
+                        </label>
+                    </div>
+                    <div class="config-group">
+                        <label for="freezeEncoder" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="freezeEncoder" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                            Freeze Encoder Weights
+                        </label>
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="loadPretrainedBefore">Load Before Pretrain:</label>
+                        <select id="loadPretrainedBefore" onchange="markConfigDirty()" style="min-width: 250px;">
                             <option value="">None (train from scratch)</option>
                         </select>
                     </div>
                     <button onclick="refreshEncoderList()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
-                        🔄 Refresh List
+                        🔄 Refresh
                     </button>
                 </div>
+            </div>
+
+            <!-- Save Button -->
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #d0d9ff; text-align: center;">
+                <button id="saveConfigBtn" onclick="saveTaskConfig()" style="padding: 12px 40px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px;">
+                    💾 Save All Configuration
+                </button>
+                <span id="configStatus" style="font-size: 14px; color: #6b7280; margin-left: 15px;"></span>
             </div>
         </div>
         
@@ -564,15 +667,6 @@
             </div>
         </div>
         
-        <div class="results-section" id="resultsSection">
-            <h2 class="section-title" id="resultsTitle">Live Results</h2>
-            <div class="results-grid" id="resultsContainer">
-                <div style="text-align: center; color: #6b7280; grid-column: 1 / -1;">
-                    Start main training to see results...
-                </div>
-            </div>
-        </div>
-        
         <div class="charts">
             <div class="chart-container">
                 <div class="chart-title">Loss Over Time (20-batch Moving Average)</div>
@@ -581,6 +675,15 @@
             <div class="chart-container">
                 <div class="chart-title">Accuracy Over Time (20-batch Moving Average)</div>
                 <canvas id="accuracyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="results-section" id="resultsSection">
+            <h2 class="section-title" id="resultsTitle">Live Results</h2>
+            <div class="results-grid" id="resultsContainer">
+                <div style="text-align: center; color: #6b7280; grid-column: 1 / -1;">
+                    Start main training to see results...
+                </div>
             </div>
         </div>
     </div>
@@ -603,12 +706,33 @@
             .then(response => response.json())
             .then(data => {
                 currentTaskType = data.task_type;
+                // Task configuration
                 document.getElementById('taskType').value = data.task_type;
                 document.getElementById('numDistractors').value = data.num_distractors;
+                document.getElementById('bottleneckType').value = data.bottleneck_type || 'communication';
+                
+                // Model architecture
+                document.getElementById('hiddenDim').value = data.hidden_dim || 128;
+                document.getElementById('latentDim').value = data.latent_dim || 128;
+                document.getElementById('numConvLayers').value = data.num_conv_layers || 3;
+                
+                // Communication protocol
+                document.getElementById('vocabSize').value = data.vocab_size || 100;
+                document.getElementById('maxMessageLength').value = data.max_message_length || 3;
+                document.getElementById('temperature').value = data.temperature || 1.0;
+                
+                // Training hyperparameters
+                document.getElementById('batchSize').value = data.batch_size || 32;
+                document.getElementById('learningRate').value = data.learning_rate || 0.00001;
+                document.getElementById('pretrainLearningRate').value = data.pretrain_learning_rate || 0.0001;
+                
+                // Pretraining configuration
                 document.getElementById('pretrainTaskType').value = data.pretrain_task_type || 'binary';
                 document.getElementById('usePretrained').checked = data.use_pretrained;
                 document.getElementById('freezeEncoder').checked = data.freeze_encoder || false;
+                
                 updateTaskUILabels();
+                updateBottleneckVisibility();
                 configDirty = false;
                 updateConfigStatus();
                 
@@ -627,6 +751,17 @@
             const taskType = document.getElementById('taskType').value;
             currentTaskType = taskType;
             updateTaskUILabels();
+            updateBottleneckVisibility();
+        }
+        
+        function updateBottleneckVisibility() {
+            const bottleneckType = document.getElementById('bottleneckType').value;
+            const commSection = document.getElementById('commSection');
+            if (bottleneckType === 'communication') {
+                commSection.style.display = 'block';
+            } else {
+                commSection.style.display = 'none';
+            }
         }
         
         function updateConfigStatus() {
@@ -682,8 +817,27 @@
         }
         
         function saveTaskConfig() {
+            // Task configuration
             const taskType = document.getElementById('taskType').value;
             const numDistractors = document.getElementById('numDistractors').value;
+            const bottleneckType = document.getElementById('bottleneckType').value;
+            
+            // Model architecture
+            const hiddenDim = document.getElementById('hiddenDim').value;
+            const latentDim = document.getElementById('latentDim').value;
+            const numConvLayers = document.getElementById('numConvLayers').value;
+            
+            // Communication protocol
+            const vocabSize = document.getElementById('vocabSize').value;
+            const maxMessageLength = document.getElementById('maxMessageLength').value;
+            const temperature = document.getElementById('temperature').value;
+            
+            // Training hyperparameters
+            const batchSize = document.getElementById('batchSize').value;
+            const learningRate = document.getElementById('learningRate').value;
+            const pretrainLearningRate = document.getElementById('pretrainLearningRate').value;
+            
+            // Pretraining configuration
             const pretrainTaskType = document.getElementById('pretrainTaskType').value;
             const usePretrained = document.getElementById('usePretrained').checked;
             const freezeEncoder = document.getElementById('freezeEncoder').checked;
@@ -695,6 +849,16 @@
                 body: JSON.stringify({
                     task_type: taskType,
                     num_distractors: parseInt(numDistractors),
+                    bottleneck_type: bottleneckType,
+                    hidden_dim: parseInt(hiddenDim),
+                    latent_dim: parseInt(latentDim),
+                    num_conv_layers: parseInt(numConvLayers),
+                    vocab_size: parseInt(vocabSize),
+                    max_message_length: parseInt(maxMessageLength),
+                    temperature: parseFloat(temperature),
+                    batch_size: parseInt(batchSize),
+                    learning_rate: parseFloat(learningRate),
+                    pretrain_learning_rate: parseFloat(pretrainLearningRate),
                     pretrain_task_type: pretrainTaskType,
                     use_pretrained: usePretrained,
                     freeze_encoder: freezeEncoder,

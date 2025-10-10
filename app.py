@@ -22,12 +22,28 @@ app = Flask(__name__)
 training_state = {
     'running': False,
     'mode': None,  # 'pretrain' or 'train'
-    'task_type': getattr(config, 'TASK_TYPE', 'reconstruction'),  # 'reconstruction' or 'selection'
+    # Task configuration
+    'task_type': getattr(config, 'TASK_TYPE', 'reconstruction'),
     'num_distractors': getattr(config, 'NUM_DISTRACTORS', 3),
-    'pretrain_task_type': getattr(config, 'PRETRAIN_TASK_TYPE', 'binary'),  # 'binary' or 'selection'
+    'bottleneck_type': getattr(config, 'BOTTLENECK_TYPE', 'communication'),
+    # Model architecture
+    'hidden_dim': getattr(config, 'HIDDEN_DIM', 128),
+    'latent_dim': getattr(config, 'LATENT_DIM', 128),
+    'num_conv_layers': getattr(config, 'NUM_CONV_LAYERS', 3),
+    # Communication protocol
+    'vocab_size': getattr(config, 'VOCAB_SIZE', 100),
+    'max_message_length': getattr(config, 'MAX_MESSAGE_LENGTH', 3),
+    'temperature': getattr(config, 'TEMPERATURE', 1.0),
+    # Training hyperparameters
+    'batch_size': getattr(config, 'BATCH_SIZE', 32),
+    'learning_rate': getattr(config, 'LEARNING_RATE', 1e-5),
+    'pretrain_learning_rate': getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-4),
+    # Pretraining configuration
+    'pretrain_task_type': getattr(config, 'PRETRAIN_TASK_TYPE', 'binary'),
     'use_pretrained': getattr(config, 'USE_PRETRAINED', True),
     'freeze_encoder': getattr(config, 'FREEZE_ENCODER', False),
-    'load_pretrained_before_pretrain': None,  # Path to encoder to load before pretraining (None = train from scratch)
+    'load_pretrained_before_pretrain': None,  # Path to encoder to load before pretraining
+    # Training state
     'epoch': 0,
     'batch': 0,
     'metrics': {
@@ -1121,8 +1137,23 @@ def get_status():
 @app.route('/task_config', methods=['GET'])
 def get_task_config():
     return jsonify({
+        # Task configuration
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
+        'bottleneck_type': training_state['bottleneck_type'],
+        # Model architecture
+        'hidden_dim': training_state['hidden_dim'],
+        'latent_dim': training_state['latent_dim'],
+        'num_conv_layers': training_state['num_conv_layers'],
+        # Communication protocol
+        'vocab_size': training_state['vocab_size'],
+        'max_message_length': training_state['max_message_length'],
+        'temperature': training_state['temperature'],
+        # Training hyperparameters
+        'batch_size': training_state['batch_size'],
+        'learning_rate': training_state['learning_rate'],
+        'pretrain_learning_rate': training_state['pretrain_learning_rate'],
+        # Pretraining configuration
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
         'freeze_encoder': training_state['freeze_encoder'],
@@ -1137,10 +1168,40 @@ def set_task_config():
         return jsonify({'status': 'error', 'message': 'Cannot change config while training'})
     
     data = json.loads(request.data)
+    
+    # Task configuration
     if 'task_type' in data:
         training_state['task_type'] = data['task_type']
     if 'num_distractors' in data:
         training_state['num_distractors'] = int(data['num_distractors'])
+    if 'bottleneck_type' in data:
+        training_state['bottleneck_type'] = data['bottleneck_type']
+    
+    # Model architecture
+    if 'hidden_dim' in data:
+        training_state['hidden_dim'] = int(data['hidden_dim'])
+    if 'latent_dim' in data:
+        training_state['latent_dim'] = int(data['latent_dim'])
+    if 'num_conv_layers' in data:
+        training_state['num_conv_layers'] = int(data['num_conv_layers'])
+    
+    # Communication protocol
+    if 'vocab_size' in data:
+        training_state['vocab_size'] = int(data['vocab_size'])
+    if 'max_message_length' in data:
+        training_state['max_message_length'] = int(data['max_message_length'])
+    if 'temperature' in data:
+        training_state['temperature'] = float(data['temperature'])
+    
+    # Training hyperparameters
+    if 'batch_size' in data:
+        training_state['batch_size'] = int(data['batch_size'])
+    if 'learning_rate' in data:
+        training_state['learning_rate'] = float(data['learning_rate'])
+    if 'pretrain_learning_rate' in data:
+        training_state['pretrain_learning_rate'] = float(data['pretrain_learning_rate'])
+    
+    # Pretraining configuration
     if 'pretrain_task_type' in data:
         training_state['pretrain_task_type'] = data['pretrain_task_type']
     if 'use_pretrained' in data:
@@ -1154,6 +1215,16 @@ def set_task_config():
         'status': 'success',
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
+        'bottleneck_type': training_state['bottleneck_type'],
+        'hidden_dim': training_state['hidden_dim'],
+        'latent_dim': training_state['latent_dim'],
+        'num_conv_layers': training_state['num_conv_layers'],
+        'vocab_size': training_state['vocab_size'],
+        'max_message_length': training_state['max_message_length'],
+        'temperature': training_state['temperature'],
+        'batch_size': training_state['batch_size'],
+        'learning_rate': training_state['learning_rate'],
+        'pretrain_learning_rate': training_state['pretrain_learning_rate'],
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
         'freeze_encoder': training_state['freeze_encoder'],
