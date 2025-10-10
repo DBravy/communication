@@ -1033,7 +1033,11 @@ def train_worker():
                     'metrics': training_state['metrics']
                 })
                 
-                if batch_idx % 10 == 0:
+                time.sleep(0.01)
+                
+                # Visualization at epoch level
+                if epoch % 2 == 0:  # Visualize every 2 epochs
+                    # Training batch visualization
                     if task_type == 'selection':
                         results = get_selections(model, batch_data, device, task_type)
                     elif task_type == 'puzzle_classification':
@@ -1041,23 +1045,22 @@ def train_worker():
                     else:
                         results = get_reconstructions(model, grids, sizes, device, num_samples=1)
                     reconstructions_queue.put(results)
-                
-                time.sleep(0.01)
-                            
-                for val_batch in val_loader:
-                    if task_type == 'selection':
-                        val_grids = val_batch[0].to(device)
-                        results = get_selections(model, val_batch, device, task_type)
-                    elif task_type == 'puzzle_classification':
-                        val_grids, val_sizes, val_labels = val_batch
-                        val_grids = val_grids.to(device)
-                        results = get_classification_preview(model, val_grids, val_sizes, device)
-                    else:
-                        val_grids, val_sizes = val_batch
-                        val_grids = val_grids.to(device)
-                        results = get_reconstructions(model, val_grids, val_sizes, device, num_samples=1)
-                    reconstructions_queue.put(results)
-                    break
+                    
+                    # Validation batch visualization
+                    for val_batch in val_loader:
+                        if task_type == 'selection':
+                            val_grids = val_batch[0].to(device)
+                            results = get_selections(model, val_batch, device, task_type)
+                        elif task_type == 'puzzle_classification':
+                            val_grids, val_sizes, val_labels = val_batch
+                            val_grids = val_grids.to(device)
+                            results = get_classification_preview(model, val_grids, val_sizes, device)
+                        else:
+                            val_grids, val_sizes = val_batch
+                            val_grids = val_grids.to(device)
+                            results = get_reconstructions(model, val_grids, val_sizes, device, num_samples=1)
+                        reconstructions_queue.put(results)
+                        break
                         
         training_state['running'] = False
         training_state['mode'] = None
