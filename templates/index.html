@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARC Training Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .task-config {
+            padding: 20px 30px;
+            background: #f0f4ff;
+            border-bottom: 2px solid #d0d9ff;
+        }
+        
+        .task-config h3 {
+            margin-bottom: 15px;
+            color: #4c51bf;
+        }
+        
+        .config-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .config-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .config-group label {
+            font-weight: 600;
+            color: #4a5568;
+        }
+        
+        select, input[type="number"] {
+            padding: 8px 12px;
+            border: 2px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+        
+        select:focus, input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .btn-pretrain {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .btn-pretrain:hover:not(:disabled) {
+            background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(59, 130, 246, 0.3);
+        }
+        
+        .btn-train {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-train:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-stop:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status-display {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+        
+        .status-item {
+            text-align: center;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #6b7280;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1f2937;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-running {
+            background: #10b981;
+        }
+        
+        .status-pretraining {
+            background: #3b82f6;
+        }
+        
+        .status-stopped {
+            background: #6b7280;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .mode-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        
+        .mode-pretrain {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+        
+        .mode-train {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .metrics-summary {
+            padding: 30px;
+            background: #f8f9fa;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-label {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+        
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .results-section {
+            padding: 30px;
+            background: white;
+        }
+        
+        .section-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .result-container {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .pair-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .pair-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+        }
+        
+        .accuracy-badge, .selection-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+        
+        .grids-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .candidates-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .candidate-item {
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            border: 2px solid #e5e7eb;
+        }
+        
+        .candidate-item.target {
+            border-color: #10b981;
+        }
+        
+        .candidate-item.selected {
+            background: #f0fdf4;
+        }
+        
+        .candidate-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #6b7280;
+            min-width: 80px;
+        }
+        
+        .candidate-prob {
+            font-size: 12px;
+            color: #4b5563;
+            min-width: 60px;
+        }
+        
+        .grid-wrapper {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .grid-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .arc-grid {
+            display: inline-grid;
+            gap: 2px;
+            padding: 10px;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        
+        .grid-cell {
+            width: 20px;
+            height: 20px;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .message-display {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff7ed;
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+            color: #9a3412;
+            word-break: break-all;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+        
+        .charts {
+            padding: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            background: #f8f9fa;
+        }
+        
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        canvas {
+            max-height: 300px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .info-box {
+            background: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 20px 30px;
+            border-radius: 4px;
+        }
+        
+        .info-box h3 {
+            color: #1e40af;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+        
+        .info-box p {
+            color: #1e40af;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ARC Training Monitor</h1>
+            <p>Communication Model Training Dashboard</p>
+        </div>
+        
+        <div class="info-box">
+            <h3>Training Pipeline</h3>
+            <p><strong>Step 1: Pretraining (Optional)</strong> - Train the encoder with one of:</p>
+            <p style="margin-left: 20px;">• <strong>Binary Classification:</strong> Distinguish real ARC grids from random noise</p>
+            <p style="margin-left: 20px;">• <strong>Selection Task:</strong> Select correct grid from distractors</p>
+            <p style="margin-left: 20px;">• <strong>Puzzle Classification:</strong> Classify grids by puzzle ID (inputs/outputs separated) 🆕</p>
+            <p><strong>Step 2: Main Training</strong> - Train the full communication system.</p>
+            <p style="margin-left: 20px;">• <strong>Use Pretrained Encoder:</strong> Load the pretrained encoder weights</p>
+            <p style="margin-left: 20px;">• <strong>Freeze Encoder Weights:</strong> Keep encoder fixed during training (recommended with pretrained encoders)</p>
+        </div>
+        
+        <div class="task-config">
+            <h3>Task Configuration</h3>
+            <div class="config-row">
+                <div class="config-group">
+                    <label for="taskType">Task Type:</label>
+                    <select id="taskType" onchange="markConfigDirty()">
+                        <option value="reconstruction">Reconstruction</option>
+                        <option value="selection">Selection</option>
+                        <option value="puzzle_classification">Puzzle Classification</option>
+                    </select>
+                </div>
+                <div class="config-group" id="distractorsGroup">
+                    <label for="numDistractors">Number of Distractors:</label>
+                    <input type="number" id="numDistractors" min="1" max="20" value="3" onchange="markConfigDirty()">
+                </div>
+                <div class="config-group">
+                    <label for="pretrainTaskType">Pretraining Task:</label>
+                    <select id="pretrainTaskType" onchange="markConfigDirty()">
+                        <option value="binary">Binary Classification</option>
+                        <option value="selection">Selection Task</option>
+                        <option value="puzzle_classification">Puzzle Classification</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label for="usePretrained" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="usePretrained" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                        Use Pretrained Encoder
+                    </label>
+                </div>
+                <div class="config-group">
+                    <label for="freezeEncoder" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="freezeEncoder" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                        Freeze Encoder Weights
+                    </label>
+                </div>
+                <div class="config-group">
+                    <button id="saveConfigBtn" onclick="saveTaskConfig()" style="padding: 8px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        💾 Save Configuration
+                    </button>
+                    <span id="configStatus" style="font-size: 12px; color: #6b7280; margin-left: 10px;"></span>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #d0d9ff;">
+                <h4 style="margin-bottom: 10px; color: #4c51bf;">🔄 Load Pretrained Encoder Before Pretraining</h4>
+                <p style="font-size: 13px; color: #6b7280; margin-bottom: 10px;">
+                    Optional: Start pretraining from an existing pretrained encoder (e.g., pretrain on selection task after binary pretraining)
+                </p>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="loadPretrainedBefore">Load From:</label>
+                        <select id="loadPretrainedBefore" onchange="markConfigDirty()" style="min-width: 300px;">
+                            <option value="">None (train from scratch)</option>
+                        </select>
+                    </div>
+                    <button onclick="refreshEncoderList()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        🔄 Refresh List
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="button-group">
+                <button class="btn-pretrain" id="pretrainBtn" onclick="startPretrain()">
+                    Start Pretraining
+                </button>
+                <button class="btn-train" id="trainBtn" onclick="startTrain()">
+                    Start Main Training
+                </button>
+                <button class="btn-stop" id="stopBtn" onclick="stopTraining()" disabled>
+                    Stop Training
+                </button>
+            </div>
+            
+            <div class="status-display">
+                <div class="status-item">
+                    <div class="status-label">Status</div>
+                    <div class="status-value">
+                        <span class="status-indicator status-stopped" id="statusIndicator"></span>
+                        <span id="statusText">Stopped</span>
+                        <span class="mode-badge hidden" id="modeBadge"></span>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Epoch</div>
+                    <div class="status-value" id="epochDisplay">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Batch</div>
+                    <div class="status-value" id="batchDisplay">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="metrics-summary">
+            <div class="metric-card">
+                <div class="metric-label">Loss (Moving Avg)</div>
+                <div class="metric-value" id="lossValue">0.000</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label" id="accuracyLabel">Accuracy (Moving Avg)</div>
+                <div class="metric-value" id="accValue">0.00%</div>
+            </div>
+        </div>
+        
+        <div class="results-section" id="resultsSection">
+            <h2 class="section-title" id="resultsTitle">Live Results</h2>
+            <div class="results-grid" id="resultsContainer">
+                <div style="text-align: center; color: #6b7280; grid-column: 1 / -1;">
+                    Start main training to see results...
+                </div>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="chart-container">
+                <div class="chart-title">Loss Over Time (20-batch Moving Average)</div>
+                <canvas id="lossChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Accuracy Over Time (20-batch Moving Average)</div>
+                <canvas id="accuracyChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const ARC_COLORS = [
+            '#000000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+            '#AAAAAA', '#F012BE', '#7FDBFF', '#870C25', '#FF851B'
+        ];
+        
+        let currentMode = null;
+        let currentTaskType = 'reconstruction';
+        let configDirty = false;
+        // Performance controls for long-running sessions (no sliding window)
+        const MAX_POINTS = 10000;          // Hard cap on points kept per chart (older points are decimated)
+        const CHART_UPDATE_MS = 200;       // Throttle chart renders to at most ~5 FPS
+        
+        // Load task config on page load
+        fetch('/task_config')
+            .then(response => response.json())
+            .then(data => {
+                currentTaskType = data.task_type;
+                document.getElementById('taskType').value = data.task_type;
+                document.getElementById('numDistractors').value = data.num_distractors;
+                document.getElementById('pretrainTaskType').value = data.pretrain_task_type || 'binary';
+                document.getElementById('usePretrained').checked = data.use_pretrained;
+                document.getElementById('freezeEncoder').checked = data.freeze_encoder || false;
+                updateTaskUILabels();
+                configDirty = false;
+                updateConfigStatus();
+                
+                // Load encoder list and set current selection
+                refreshEncoderList().then(() => {
+                    if (data.load_pretrained_before_pretrain) {
+                        document.getElementById('loadPretrainedBefore').value = data.load_pretrained_before_pretrain;
+                    }
+                });
+            });
+        
+        function markConfigDirty() {
+            configDirty = true;
+            updateConfigStatus();
+            // Update UI labels immediately for better UX
+            const taskType = document.getElementById('taskType').value;
+            currentTaskType = taskType;
+            updateTaskUILabels();
+        }
+        
+        function updateConfigStatus() {
+            const statusEl = document.getElementById('configStatus');
+            const saveBtn = document.getElementById('saveConfigBtn');
+            
+            if (configDirty) {
+                statusEl.textContent = '⚠️ Unsaved changes';
+                statusEl.style.color = '#f59e0b';
+                saveBtn.style.background = '#f59e0b';
+                saveBtn.style.animation = 'pulse 2s infinite';
+            } else {
+                statusEl.textContent = '✓ Saved';
+                statusEl.style.color = '#10b981';
+                saveBtn.style.background = '#667eea';
+                saveBtn.style.animation = 'none';
+            }
+        }
+        
+        function refreshEncoderList() {
+            return fetch('/pretrained_encoders')
+                .then(response => response.json())
+                .then(data => {
+                    const select = document.getElementById('loadPretrainedBefore');
+                    const currentValue = select.value;
+                    
+                    // Clear existing options except the first one
+                    select.innerHTML = '<option value="">None (train from scratch)</option>';
+                    
+                    // Add encoder options
+                    if (data.encoders && data.encoders.length > 0) {
+                        data.encoders.forEach(encoder => {
+                            const option = document.createElement('option');
+                            option.value = encoder.path;
+                            
+                            let label = `${encoder.filename}`;
+                            if (encoder.task_type !== 'unknown') {
+                                label += ` (${encoder.task_type}, ${encoder.val_acc.toFixed(1)}% acc, epoch ${encoder.epoch})`;
+                            }
+                            option.textContent = label;
+                            select.appendChild(option);
+                        });
+                    }
+                    
+                    // Restore previous selection if it still exists
+                    if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+                        select.value = currentValue;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading encoder list:', error);
+                });
+        }
+        
+        function saveTaskConfig() {
+            const taskType = document.getElementById('taskType').value;
+            const numDistractors = document.getElementById('numDistractors').value;
+            const pretrainTaskType = document.getElementById('pretrainTaskType').value;
+            const usePretrained = document.getElementById('usePretrained').checked;
+            const freezeEncoder = document.getElementById('freezeEncoder').checked;
+            const loadPretrainedBefore = document.getElementById('loadPretrainedBefore').value;
+            
+            fetch('/task_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    task_type: taskType,
+                    num_distractors: parseInt(numDistractors),
+                    pretrain_task_type: pretrainTaskType,
+                    use_pretrained: usePretrained,
+                    freeze_encoder: freezeEncoder,
+                    load_pretrained_before_pretrain: loadPretrainedBefore || null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    currentTaskType = data.task_type;
+                    configDirty = false;
+                    updateConfigStatus();
+                    updateTaskUILabels();
+                    
+                    // Show brief confirmation
+                    const statusEl = document.getElementById('configStatus');
+                    statusEl.textContent = '✓ Configuration saved!';
+                    statusEl.style.color = '#10b981';
+                } else {
+                    alert(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving config:', error);
+                alert('Error saving configuration');
+            });
+        }
+        
+        function updateTaskUILabels() {
+            const distractorsGroup = document.getElementById('distractorsGroup');
+            const resultsTitle = document.getElementById('resultsTitle');
+            const accuracyLabel = document.getElementById('accuracyLabel');
+            
+            if (currentTaskType === 'selection') {
+                distractorsGroup.style.display = 'flex';
+                resultsTitle.textContent = 'Live Selections';
+                accuracyLabel.textContent = 'Selection Accuracy (Moving Avg)';
+            } else if (currentTaskType === 'puzzle_classification') {
+                distractorsGroup.style.display = 'none';
+                resultsTitle.textContent = 'Puzzle Classification';
+                accuracyLabel.textContent = 'Classification Accuracy (Moving Avg)';
+            } else {
+                distractorsGroup.style.display = 'none';
+                resultsTitle.textContent = 'Live Reconstructions';
+                accuracyLabel.textContent = 'Pixel Accuracy (Moving Avg)';
+            }
+        }
+        
+        function renderGrid(gridData, containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const rows = gridData.length;
+            const cols = gridData[0].length;
+            
+            const gridElement = document.createElement('div');
+            gridElement.className = 'arc-grid';
+            gridElement.style.gridTemplateColumns = `repeat(${cols}, 20px)`;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+                    const colorValue = gridData[r][c];
+                    cell.style.backgroundColor = ARC_COLORS[colorValue] || '#ffffff';
+                    gridElement.appendChild(cell);
+                }
+            }
+            
+            container.appendChild(gridElement);
+        }
+        
+        function displayReconstructions(reconstructions) {
+            const container = document.getElementById('resultsContainer');
+            container.innerHTML = '';
+            
+            reconstructions.forEach((recon, idx) => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-container';
+                
+                const accuracyColor = recon.accuracy > 80 ? '#10b981' : 
+                                      recon.accuracy > 50 ? '#f59e0b' : '#ef4444';
+                
+                resultDiv.innerHTML = `
+                    <div class="pair-header">
+                        <span class="pair-title">Sample ${idx + 1}</span>
+                        <span class="accuracy-badge" style="background: ${accuracyColor}">
+                            ${recon.accuracy.toFixed(1)}% Accurate
+                        </span>
+                    </div>
+                    <div class="grids-container">
+                        <div class="grid-wrapper">
+                            <div class="grid-label">INPUT (${recon.actual_size[0]}×${recon.actual_size[1]})</div>
+                            <div id="input-${idx}" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-wrapper">
+                            <div class="grid-label">OUTPUT (${recon.output.length}×${recon.output[0].length})</div>
+                            <div id="output-${idx}" style="text-align: center;"></div>
+                        </div>
+                    </div>
+                    <div class="message-display">
+                        Message: [${recon.message.join(', ')}]
+                    </div>
+                `;
+                
+                container.appendChild(resultDiv);
+                
+                setTimeout(() => {
+                    renderGrid(recon.input, `input-${idx}`);
+                    renderGrid(recon.output, `output-${idx}`);
+                }, 0);
+            });
+        }
+        
+        function displaySelections(selections) {
+            const container = document.getElementById('resultsContainer');
+            container.innerHTML = '';
+            
+            selections.forEach((sel, idx) => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-container';
+                
+                const selectionColor = sel.correct ? '#10b981' : '#ef4444';
+                const selectionText = sel.correct ? `✓ Correct (${sel.confidence.toFixed(1)}%)` : `✗ Incorrect (${sel.confidence.toFixed(1)}%)`;
+                
+                let candidatesHTML = '';
+                sel.candidates.forEach((cand, cIdx) => {
+                    const classes = ['candidate-item'];
+                    if (cand.is_target) classes.push('target');
+                    if (cand.is_selected) classes.push('selected');
+                    
+                    const targetLabel = cand.is_target ? '✓ TARGET' : '';
+                    const selectedLabel = cand.is_selected ? '← SELECTED' : '';
+                    
+                    candidatesHTML += `
+                        <div class="${classes.join(' ')}">
+                            <div class="candidate-label">Candidate ${cIdx} ${targetLabel} ${selectedLabel}</div>
+                            <div class="candidate-prob">${(cand.probability * 100).toFixed(1)}%</div>
+                            <div id="cand-${idx}-${cIdx}" style="text-align: center;"></div>
+                        </div>
+                    `;
+                });
+                
+                resultDiv.innerHTML = `
+                    <div class="pair-header">
+                        <span class="pair-title">Sample ${idx + 1}</span>
+                        <span class="selection-badge" style="background: ${selectionColor}">
+                            ${selectionText}
+                        </span>
+                    </div>
+                    <div class="grid-wrapper" style="margin-bottom: 15px;">
+                        <div class="grid-label">TARGET GRID (${sel.actual_size[0]}×${sel.actual_size[1]})</div>
+                        <div id="target-${idx}" style="text-align: center;"></div>
+                    </div>
+                    <div style="margin-bottom: 10px; font-weight: 600; color: #4a5568;">
+                        Candidates (${sel.num_candidates} options):
+                    </div>
+                    <div class="candidates-container">
+                        ${candidatesHTML}
+                    </div>
+                    <div class="message-display">
+                        Message: [${sel.message.join(', ')}]
+                    </div>
+                `;
+                
+                container.appendChild(resultDiv);
+                
+                setTimeout(() => {
+                    renderGrid(sel.target, `target-${idx}`);
+                    sel.candidates.forEach((cand, cIdx) => {
+                        renderGrid(cand.grid, `cand-${idx}-${cIdx}`);
+                    });
+                }, 0);
+            });
+        }
+        
+        function displayResults(results) {
+            if (results && results.length > 0) {
+                if (results[0].task_type === 'selection') {
+                    displaySelections(results);
+                } else {
+                    displayReconstructions(results);
+                }
+            }
+        }
+        
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    // Enable built-in decimation to reduce draw cost when datasets get large
+                    decimation: {
+                        enabled: true,
+                        algorithm: 'lttb',
+                        samples: 1500,   // target samples for display
+                        threshold: 2000  // start decimating after this many points
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Batch'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        beginAtZero: true
+                    }
+                }
+            }
+        };
+        
+        const lossChart = new Chart(document.getElementById('lossChart'), {
+            ...chartConfig,
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Loss (Moving Avg)',
+                    data: [],
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    tension: 0.4
+                }]
+            }
+        });
+        
+        const accuracyChart = new Chart(document.getElementById('accuracyChart'), {
+            ...chartConfig,
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Accuracy % (Moving Avg)',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                ...chartConfig.options,
+                scales: {
+                    ...chartConfig.options.scales,
+                    y: {
+                        display: true,
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+        
+        let batchCounter = 0;
+        let rawLossData = [];
+        let rawAccuracyData = [];
+        const MOVING_AVG_WINDOW = 20;
+
+        // Throttled rendering
+        let lastRenderTime = 0;
+        function renderChartsThrottled(force = false) {
+            const now = performance.now();
+            if (!force && now - lastRenderTime < CHART_UPDATE_MS) return;
+            lossChart.update('none');
+            accuracyChart.update('none');
+            lastRenderTime = now;
+        }
+
+        // In-place decimation keeping recent half at full resolution and halving density of older half
+        function downsampleChart(chart, maxPoints) {
+            const labels = chart.data.labels;
+            const data = chart.data.datasets[0].data;
+            if (!labels || labels.length <= maxPoints) return;
+
+            const keepRecent = Math.floor(maxPoints / 2);
+            const oldCount = labels.length - keepRecent;
+
+            const newLabels = [];
+            const newData = [];
+            // Downsample older half by factor of 2
+            for (let i = 0; i < oldCount; i += 2) {
+                newLabels.push(labels[i]);
+                newData.push(data[i]);
+            }
+            // Keep recent half fully
+            for (let i = labels.length - keepRecent; i < labels.length; i++) {
+                newLabels.push(labels[i]);
+                newData.push(data[i]);
+            }
+            chart.data.labels = newLabels;
+            chart.data.datasets[0].data = newData;
+        }
+        
+        function calculateMovingAverage(data, windowSize) {
+            if (data.length < windowSize) {
+                // If we don't have enough data points, return average of all points so far
+                const sum = data.reduce((acc, val) => acc + val, 0);
+                return sum / data.length;
+            }
+            // Calculate average of last windowSize points
+            const recentData = data.slice(-windowSize);
+            const sum = recentData.reduce((acc, val) => acc + val, 0);
+            return sum / windowSize;
+        }
+        
+        function updateCharts(metrics) {
+            batchCounter++;
+            const label = batchCounter.toString();
+            
+            // Store raw data
+            rawLossData.push(metrics.loss);
+            rawAccuracyData.push(metrics.accuracy);
+            // Cap raw arrays (we only need the last window for moving avg)
+            if (rawLossData.length > MOVING_AVG_WINDOW) rawLossData.shift();
+            if (rawAccuracyData.length > MOVING_AVG_WINDOW) rawAccuracyData.shift();
+            
+            // Calculate moving averages
+            const lossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+            const accuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+            
+            // Update charts with moving averages
+            lossChart.data.labels.push(label);
+            lossChart.data.datasets[0].data.push(lossMA);
+            accuracyChart.data.labels.push(label);
+            accuracyChart.data.datasets[0].data.push(accuracyMA);
+
+            // Memory-friendly decimation (no sliding window; we keep whole history at reduced density)
+            downsampleChart(lossChart, MAX_POINTS);
+            downsampleChart(accuracyChart, MAX_POINTS);
+
+            // Throttled render
+            renderChartsThrottled();
+            
+            // Display moving average values in the metric cards
+            document.getElementById('lossValue').textContent = lossMA.toFixed(3);
+            document.getElementById('accValue').textContent = accuracyMA.toFixed(2) + '%';
+        }
+        
+        function resetCharts() {
+            batchCounter = 0;
+            rawLossData = [];
+            rawAccuracyData = [];
+            lossChart.data.labels = [];
+            lossChart.data.datasets[0].data = [];
+            lossChart.update('none');
+            
+            accuracyChart.data.labels = [];
+            accuracyChart.data.datasets[0].data = [];
+            accuracyChart.update('none');
+            lastRenderTime = 0;
+        }
+        
+        function startPretrain() {
+            if (configDirty) {
+                if (!confirm('You have unsaved configuration changes. Do you want to save them before starting pretraining?')) {
+                    return;
+                }
+                saveTaskConfig();
+                // Wait a bit for save to complete
+                setTimeout(() => startPretrainInternal(), 500);
+            } else {
+                startPretrainInternal();
+            }
+        }
+        
+        function startPretrainInternal() {
+            fetch('/start_pretrain', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        currentMode = 'pretrain';
+                        document.getElementById('pretrainBtn').disabled = true;
+                        document.getElementById('trainBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('statusText').textContent = 'Running';
+                        document.getElementById('statusIndicator').className = 'status-indicator status-pretraining';
+                        document.getElementById('modeBadge').className = 'mode-badge mode-pretrain';
+                        document.getElementById('modeBadge').textContent = 'PRETRAINING';
+                        document.getElementById('accuracyLabel').textContent = 'Classification Accuracy (Moving Avg)';
+                        document.getElementById('resultsSection').classList.add('hidden');
+                        resetCharts();
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+        
+        function startTrain() {
+            if (configDirty) {
+                if (!confirm('You have unsaved configuration changes. Do you want to save them before starting training?')) {
+                    return;
+                }
+                saveTaskConfig();
+                // Wait a bit for save to complete
+                setTimeout(() => startTrainInternal(), 500);
+            } else {
+                startTrainInternal();
+            }
+        }
+        
+        function startTrainInternal() {
+            fetch('/start_train', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        currentMode = 'train';
+                        document.getElementById('pretrainBtn').disabled = true;
+                        document.getElementById('trainBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('statusText').textContent = 'Running';
+                        document.getElementById('statusIndicator').className = 'status-indicator status-running';
+                        document.getElementById('modeBadge').className = 'mode-badge mode-train';
+                        document.getElementById('modeBadge').textContent = 'MAIN TRAINING';
+                        updateTaskUILabels();
+                        // Hide results section for puzzle_classification (no visual output)
+                        if (currentTaskType === 'puzzle_classification') {
+                            document.getElementById('resultsSection').classList.add('hidden');
+                        } else {
+                            document.getElementById('resultsSection').classList.remove('hidden');
+                        }
+                        resetCharts();
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+        
+        function stopTraining() {
+            fetch('/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'stopped') {
+                        document.getElementById('pretrainBtn').disabled = false;
+                        document.getElementById('trainBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('statusText').textContent = 'Stopped';
+                        document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                        document.getElementById('modeBadge').className = 'mode-badge hidden';
+                        currentMode = null;
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+        
+        const eventSource = new EventSource('/stream');
+        
+        eventSource.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'heartbeat') {
+                return;
+            }
+            
+            if (message.type === 'metrics') {
+                const data = message.data;
+                
+                if (data.status === 'completed') {
+                    document.getElementById('pretrainBtn').disabled = false;
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('statusText').textContent = 'Completed';
+                    document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                    document.getElementById('modeBadge').className = 'mode-badge hidden';
+                    
+                    if (data.best_val_acc) {
+                        alert(`Pretraining completed! Best validation accuracy: ${data.best_val_acc.toFixed(2)}%`);
+                    }
+                    return;
+                }
+                
+                if (data.status === 'error') {
+                    alert('Training error: ' + data.message);
+                    document.getElementById('pretrainBtn').disabled = false;
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('statusText').textContent = 'Error';
+                    document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                    document.getElementById('modeBadge').className = 'mode-badge hidden';
+                    return;
+                }
+                
+                if (data.epoch && data.batch && data.metrics) {
+                    document.getElementById('epochDisplay').textContent = data.epoch;
+                    document.getElementById('batchDisplay').textContent = data.batch;
+                    updateCharts(data.metrics);
+                }
+            }
+            
+            if (message.type === 'reconstructions') {
+                displayResults(message.data);
+            }
+        };
+        
+        eventSource.onerror = function(error) {
+            console.error('EventSource error:', error);
+        };
+        
+        setInterval(() => {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.running) {
+                        document.getElementById('pretrainBtn').disabled = true;
+                        document.getElementById('trainBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        
+                        if (data.mode === 'pretrain') {
+                            document.getElementById('statusIndicator').className = 'status-indicator status-pretraining';
+                            document.getElementById('modeBadge').className = 'mode-badge mode-pretrain';
+                            document.getElementById('modeBadge').textContent = 'PRETRAINING';
+                        } else if (data.mode === 'train') {
+                            document.getElementById('statusIndicator').className = 'status-indicator status-running';
+                            document.getElementById('modeBadge').className = 'mode-badge mode-train';
+                            document.getElementById('modeBadge').textContent = 'MAIN TRAINING';
+                        }
+                    } else {
+                        document.getElementById('pretrainBtn').disabled = false;
+                        document.getElementById('trainBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }, 2000);
+    </script>
+</body>
+</html>
