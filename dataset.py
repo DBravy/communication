@@ -31,15 +31,10 @@ class ARCDataset(Dataset):
             data = json.load(f)
         
         total_grids_before_filter = 0
-        puzzle_counter = 0
         
         for task_id, task_data in data.items():
-            # Assign a unique puzzle ID to this task
-            if track_puzzle_ids and task_id not in self.puzzle_id_map:
-                self.puzzle_id_map[task_id] = puzzle_counter
-                puzzle_counter += 1
-            
-            current_puzzle_id = self.puzzle_id_map.get(task_id, 0)
+            # DON'T assign puzzle ID here anymore!
+            # We'll assign it only when we actually add a grid from this puzzle
             
             # Process training examples
             for example in task_data.get('train', []):
@@ -47,9 +42,13 @@ class ARCDataset(Dataset):
                     grid = np.array(example['input'], dtype=np.int64)
                     total_grids_before_filter += 1
                     if self._should_include_grid(grid):
+                        # ASSIGN PUZZLE ID ONLY WHEN ACTUALLY ADDING A GRID
+                        if track_puzzle_ids and task_id not in self.puzzle_id_map:
+                            self.puzzle_id_map[task_id] = len(self.puzzle_id_map)
+                        
                         self.grids.append(grid)
                         if track_puzzle_ids:
-                            self.puzzle_ids.append(current_puzzle_id)
+                            self.puzzle_ids.append(self.puzzle_id_map[task_id])
                             self.is_input.append(True)
                         if self.max_grids and len(self.grids) >= self.max_grids:
                             break
@@ -57,9 +56,13 @@ class ARCDataset(Dataset):
                     grid = np.array(example['output'], dtype=np.int64)
                     total_grids_before_filter += 1
                     if self._should_include_grid(grid):
+                        # ASSIGN PUZZLE ID ONLY WHEN ACTUALLY ADDING A GRID
+                        if track_puzzle_ids and task_id not in self.puzzle_id_map:
+                            self.puzzle_id_map[task_id] = len(self.puzzle_id_map)
+                        
                         self.grids.append(grid)
                         if track_puzzle_ids:
-                            self.puzzle_ids.append(current_puzzle_id)
+                            self.puzzle_ids.append(self.puzzle_id_map[task_id])
                             self.is_input.append(False)
                         if self.max_grids and len(self.grids) >= self.max_grids:
                             break
@@ -74,9 +77,13 @@ class ARCDataset(Dataset):
                     grid = np.array(example['input'], dtype=np.int64)
                     total_grids_before_filter += 1
                     if self._should_include_grid(grid):
+                        # ASSIGN PUZZLE ID ONLY WHEN ACTUALLY ADDING A GRID
+                        if track_puzzle_ids and task_id not in self.puzzle_id_map:
+                            self.puzzle_id_map[task_id] = len(self.puzzle_id_map)
+                        
                         self.grids.append(grid)
                         if track_puzzle_ids:
-                            self.puzzle_ids.append(current_puzzle_id)
+                            self.puzzle_ids.append(self.puzzle_id_map[task_id])
                             self.is_input.append(True)
                         if self.max_grids and len(self.grids) >= self.max_grids:
                             break
@@ -85,9 +92,13 @@ class ARCDataset(Dataset):
                     grid = np.array(example['output'], dtype=np.int64)
                     total_grids_before_filter += 1
                     if self._should_include_grid(grid):
+                        # ASSIGN PUZZLE ID ONLY WHEN ACTUALLY ADDING A GRID
+                        if track_puzzle_ids and task_id not in self.puzzle_id_map:
+                            self.puzzle_id_map[task_id] = len(self.puzzle_id_map)
+                        
                         self.grids.append(grid)
                         if track_puzzle_ids:
-                            self.puzzle_ids.append(current_puzzle_id)
+                            self.puzzle_ids.append(self.puzzle_id_map[task_id])
                             self.is_input.append(False)
                         if self.max_grids and len(self.grids) >= self.max_grids:
                             break

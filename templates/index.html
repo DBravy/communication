@@ -519,6 +519,25 @@
                 </div>
             </div>
 
+            <!-- Data Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">📁 Data Configuration</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="maxGrids">Max Grids:</label>
+                        <input type="number" id="maxGrids" min="0" max="100000" step="100" placeholder="None (all grids)" onchange="markConfigDirty()">
+                        <span style="font-size: 12px; color: #6b7280;">(0 = all grids)</span>
+                    </div>
+                    <div class="config-group">
+                        <label for="filterGridHeight">Filter Grid Size:</label>
+                        <input type="number" id="filterGridHeight" min="0" max="30" placeholder="Height" style="width: 80px;" onchange="markConfigDirty()">
+                        <span style="color: #6b7280;">×</span>
+                        <input type="number" id="filterGridWidth" min="0" max="30" placeholder="Width" style="width: 80px;" onchange="markConfigDirty()">
+                        <span style="font-size: 12px; color: #6b7280;">(0 = all sizes)</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Model Architecture -->
             <div class="config-section">
                 <h4 class="config-section-title">🏗️ Model Architecture</h4>
@@ -711,6 +730,16 @@
                 document.getElementById('numDistractors').value = data.num_distractors;
                 document.getElementById('bottleneckType').value = data.bottleneck_type || 'communication';
                 
+                // Data configuration
+                document.getElementById('maxGrids').value = data.max_grids || 0;
+                if (data.filter_grid_size && data.filter_grid_size.length === 2) {
+                    document.getElementById('filterGridHeight').value = data.filter_grid_size[0];
+                    document.getElementById('filterGridWidth').value = data.filter_grid_size[1];
+                } else {
+                    document.getElementById('filterGridHeight').value = '';
+                    document.getElementById('filterGridWidth').value = '';
+                }
+                
                 // Model architecture
                 document.getElementById('hiddenDim').value = data.hidden_dim || 128;
                 document.getElementById('latentDim').value = data.latent_dim || 128;
@@ -822,6 +851,15 @@
             const numDistractors = document.getElementById('numDistractors').value;
             const bottleneckType = document.getElementById('bottleneckType').value;
             
+            // Data configuration
+            const maxGrids = document.getElementById('maxGrids').value;
+            const filterGridHeight = document.getElementById('filterGridHeight').value;
+            const filterGridWidth = document.getElementById('filterGridWidth').value;
+            let filterGridSize = null;
+            if (filterGridHeight && filterGridWidth && parseInt(filterGridHeight) > 0 && parseInt(filterGridWidth) > 0) {
+                filterGridSize = [parseInt(filterGridHeight), parseInt(filterGridWidth)];
+            }
+            
             // Model architecture
             const hiddenDim = document.getElementById('hiddenDim').value;
             const latentDim = document.getElementById('latentDim').value;
@@ -850,6 +888,8 @@
                     task_type: taskType,
                     num_distractors: parseInt(numDistractors),
                     bottleneck_type: bottleneckType,
+                    max_grids: maxGrids ? parseInt(maxGrids) : null,
+                    filter_grid_size: filterGridSize,
                     hidden_dim: parseInt(hiddenDim),
                     latent_dim: parseInt(latentDim),
                     num_conv_layers: parseInt(numConvLayers),

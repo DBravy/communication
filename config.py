@@ -15,7 +15,7 @@ MAX_GRID_SIZE = 30  # Maximum grid size for reconstruction
 NUM_CONV_LAYERS = 3  # Number of convolutional layers in encoder (1-3 recommended)
 
 # Bottleneck Type
-BOTTLENECK_TYPE = 'communication'  # 'communication' or 'autoencoder'
+BOTTLENECK_TYPE = 'autoencoder'  # 'communication' or 'autoencoder'
 
 # Task Type
 TASK_TYPE = 'selection'  # 'reconstruction', 'selection', or 'puzzle_classification'
@@ -36,8 +36,8 @@ PRETRAIN_TASK_TYPE = 'puzzle_classification'  # Options:
                                                # - 'binary': distinguish real ARC grids from noise
                                                # - 'selection': select correct grid from distractors
                                                # - 'puzzle_classification': classify grids by puzzle ID (inputs/outputs separated)
-USE_PRETRAINED = True  # Whether to load pretrained encoder weights
-FREEZE_ENCODER = True  # Whether to freeze encoder weights during main training (recommended when using pretrained encoder)
+USE_PRETRAINED = False  # Whether to load pretrained encoder weights
+FREEZE_ENCODER = False  # Whether to freeze encoder weights during main training (recommended when using pretrained encoder)
 PRETRAINED_BINARY_PATH = 'checkpoints/pretrained_encoder_binary.pth'  # Path to binary pretrained encoder
 PRETRAINED_SELECTION_PATH = 'checkpoints/pretrained_encoder_selection.pth'  # Path to selection pretrained encoder
 LOAD_PRETRAINED_BEFORE_PRETRAIN = None  # Path to pretrained encoder to load before starting pretraining (None = train from scratch)

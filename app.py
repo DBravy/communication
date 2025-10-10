@@ -26,6 +26,9 @@ training_state = {
     'task_type': getattr(config, 'TASK_TYPE', 'reconstruction'),
     'num_distractors': getattr(config, 'NUM_DISTRACTORS', 3),
     'bottleneck_type': getattr(config, 'BOTTLENECK_TYPE', 'communication'),
+    # Data configuration
+    'max_grids': getattr(config, 'MAX_GRIDS', None),
+    'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
     # Model architecture
     'hidden_dim': getattr(config, 'HIDDEN_DIM', 128),
     'latent_dim': getattr(config, 'LATENT_DIM', 128),
@@ -57,7 +60,7 @@ training_thread = None
 metrics_queue = queue.Queue()
 reconstructions_queue = queue.Queue()
 stop_flag = threading.Event()
-
+status_queue = queue.Queue()
 
 class NoiseGridDataset(Dataset):
     """Generates random noise grids."""
@@ -242,7 +245,7 @@ def get_reconstructions(model, grids, sizes, device, num_samples=1):
         logits_list, _, messages = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
         recon = logits_list[0].argmax(dim=1).squeeze(0).cpu().numpy()
         
-        message, _ = model.sender(single_grid, temperature=1.0)
+        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
         msg = message[0].cpu().tolist()
         
         min_h = min(actual_h, recon.shape[0])
@@ -287,7 +290,8 @@ def get_classification_preview(model, grids, sizes, device):
         pred_class = int(probs.argmax())
         
         # Get message
-        message, _ = model.sender(single_grid, temperature=1.0)
+        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+
         msg = message[0].cpu().tolist()
         
         preview = [{
@@ -341,7 +345,8 @@ def get_selections(model, batch_data, device, task_type):
         probs = torch.softmax(sel_logits, dim=0).cpu().numpy()
         pred_idx = sel_logits.argmax().item()
         
-        message, _ = model.sender(single_grid, temperature=1.0)
+        message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+
         msg = message[0].cpu().tolist()
         
         # Get all candidate grids
@@ -396,12 +401,12 @@ def pretrain_worker():
             track_puzzle_ids = False
         
         # Load ARC dataset
-        arc_dataset = ARCDataset(
+        arc_dataset = ARCDataset(  # or 'dataset' in train_worker
             config.DATA_PATH, 
             min_size=config.MIN_GRID_SIZE,
-            filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
-            max_grids=getattr(config, 'MAX_GRIDS', None),
-            num_distractors=num_distractors_for_dataset,
+            filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
+            max_grids=training_state['max_grids'],           # ✅ Read from training_state
+            num_distractors=num_distractors_for_dataset,     # (or num_distractors in train_worker)
             track_puzzle_ids=track_puzzle_ids
         )
         
@@ -805,12 +810,12 @@ def train_worker():
         num_distractors = training_state['num_distractors'] if task_type == 'selection' else 0
         track_puzzle_ids = task_type == 'puzzle_classification'
         
-        dataset = ARCDataset(
+        dataset = ARCDataset(  # or 'dataset' in train_worker
             config.DATA_PATH, 
             min_size=config.MIN_GRID_SIZE,
-            filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
-            max_grids=getattr(config, 'MAX_GRIDS', None),
-            num_distractors=num_distractors,
+            filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
+            max_grids=training_state['max_grids'],           # ✅ Read from training_state
+            num_distractors=num_distractors,     # (or num_distractors in train_worker)
             track_puzzle_ids=track_puzzle_ids
         )
         
@@ -1073,23 +1078,32 @@ def start_pretrain():
     if training_state['running']:
         return jsonify({'error': 'Training already running'}), 400
     
+    # Wait for previous thread to finish (with timeout)
+    if training_thread is not None and training_thread.is_alive():
+        training_thread.join(timeout=2.0)
+    
     stop_flag.clear()
     training_state['running'] = True
     training_state['mode'] = 'pretrain'
     training_state['epoch'] = 0
     training_state['batch'] = 0
-    training_state['viz_sample_idx'] = 0  # Reset visualization sample counter
+    training_state['viz_sample_idx'] = 0
     
+    # Clear queues
     while not metrics_queue.empty():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
+    while not status_queue.empty():  # NEW
+        status_queue.get()
     
     training_thread = threading.Thread(target=pretrain_worker)
     training_thread.start()
     
+    # NEW: Send explicit start notification
+    status_queue.put({'status': 'started', 'mode': 'pretrain'})
+    
     return jsonify({'status': 'started', 'mode': 'pretrain'})
-
 
 @app.route('/start_train', methods=['POST'])
 def start_train():
@@ -1098,22 +1112,33 @@ def start_train():
     if training_state['running']:
         return jsonify({'error': 'Training already running'}), 400
     
+    # Wait for previous thread to finish (with timeout)
+    if training_thread is not None and training_thread.is_alive():
+        training_thread.join(timeout=2.0)
+    
     stop_flag.clear()
     training_state['running'] = True
     training_state['mode'] = 'train'
     training_state['epoch'] = 0
     training_state['batch'] = 0
-    training_state['viz_sample_idx'] = 0  # Reset visualization sample counter
+    training_state['viz_sample_idx'] = 0
     
+    # Clear queues
     while not metrics_queue.empty():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
+    while not status_queue.empty():  # NEW
+        status_queue.get()
     
     training_thread = threading.Thread(target=train_worker)
     training_thread.start()
     
+    # NEW: Send explicit start notification
+    status_queue.put({'status': 'started', 'mode': 'train'})
+    
     return jsonify({'status': 'started', 'mode': 'train'})
+
 
 
 @app.route('/stop', methods=['POST'])
@@ -1126,7 +1151,11 @@ def stop_training():
     stop_flag.set()
     training_state['running'] = False
     
+    # NEW: Send explicit stop notification
+    status_queue.put({'status': 'stopped'})
+    
     return jsonify({'status': 'stopped'})
+
 
 
 @app.route('/status')
@@ -1141,6 +1170,9 @@ def get_task_config():
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
+        # Data configuration
+        'max_grids': training_state['max_grids'],
+        'filter_grid_size': training_state['filter_grid_size'],
         # Model architecture
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
@@ -1176,6 +1208,12 @@ def set_task_config():
         training_state['num_distractors'] = int(data['num_distractors'])
     if 'bottleneck_type' in data:
         training_state['bottleneck_type'] = data['bottleneck_type']
+    
+    # Data configuration
+    if 'max_grids' in data:
+        training_state['max_grids'] = int(data['max_grids']) if data['max_grids'] else None
+    if 'filter_grid_size' in data:
+        training_state['filter_grid_size'] = data['filter_grid_size']  # Can be None or [height, width]
     
     # Model architecture
     if 'hidden_dim' in data:
@@ -1216,6 +1254,8 @@ def set_task_config():
         'task_type': training_state['task_type'],
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
+        'max_grids': training_state['max_grids'],
+        'filter_grid_size': training_state['filter_grid_size'],
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
         'num_conv_layers': training_state['num_conv_layers'],
@@ -1274,25 +1314,40 @@ def list_pretrained_encoders():
 @app.route('/stream')
 def stream():
     def generate():
+        last_status_check = time.time()
+        
         while True:
+            # Check for status updates
+            try:
+                status_update = status_queue.get_nowait()
+                yield f"data: {json.dumps({'type': 'status', 'data': status_update})}\n\n"
+            except queue.Empty:
+                pass
+            
+            # Check for reconstructions
             try:
                 recons = reconstructions_queue.get_nowait()
                 yield f"data: {json.dumps({'type': 'reconstructions', 'data': recons})}\n\n"
             except queue.Empty:
                 pass
             
+            # Check for metrics
             try:
                 metrics = metrics_queue.get(timeout=0.1)
                 yield f"data: {json.dumps({'type': 'metrics', 'data': metrics})}\n\n"
             except queue.Empty:
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                # Send periodic status updates (every 2 seconds)
+                current_time = time.time()
+                if current_time - last_status_check > 2.0:
+                    yield f"data: {json.dumps({'type': 'status', 'data': {'running': training_state['running'], 'mode': training_state['mode']}})}\n\n"
+                    last_status_check = current_time
+                else:
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
             
             if not training_state['running']:
                 time.sleep(0.5)
     
     return Response(generate(), mimetype='text/event-stream')
 
-
-
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=False, threaded=True, port=5000)
+    app.run(host='0.0.0.0', debug=False, threaded=True, port=5002)
