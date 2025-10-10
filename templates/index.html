@@ -480,14 +480,15 @@
         </div>
         
         <div class="info-box">
-            <h3>Training Pipeline</h3>
-            <p><strong>Step 1: Pretraining (Optional)</strong> - Train the encoder with one of:</p>
+            <h3>Training Pipeline Overview</h3>
+            <p><strong>Step 1: Pretraining (Optional)</strong> - Train the encoder alone on a supervised task:</p>
             <p style="margin-left: 20px;">• <strong>Binary Classification:</strong> Distinguish real ARC grids from random noise</p>
             <p style="margin-left: 20px;">• <strong>Selection Task:</strong> Select correct grid from distractors</p>
-            <p style="margin-left: 20px;">• <strong>Puzzle Classification:</strong> Classify grids by puzzle ID (inputs/outputs separated) 🆕</p>
-            <p><strong>Step 2: Main Training</strong> - Train the full communication system.</p>
-            <p style="margin-left: 20px;">• <strong>Use Pretrained Encoder:</strong> Load the pretrained encoder weights</p>
-            <p style="margin-left: 20px;">• <strong>Freeze Encoder Weights:</strong> Keep encoder fixed during training (recommended with pretrained encoders)</p>
+            <p style="margin-left: 20px;">• <strong>Puzzle Classification:</strong> Classify grids by puzzle ID (inputs/outputs separated)</p>
+            <p style="margin-left: 20px;">• <em>Optional:</em> Continue from a previous checkpoint</p>
+            <p style="margin-top: 10px;"><strong>Step 2: Main Training</strong> - Train the full communication system (sender + receiver):</p>
+            <p style="margin-left: 20px;">• <strong>Load Pretrained Encoder:</strong> Initialize with encoder from Step 1 (if available)</p>
+            <p style="margin-left: 20px;">• <strong>Freeze Encoder:</strong> Keep pretrained encoder weights fixed (recommended)</p>
         </div>
         
         <div class="task-config">
@@ -597,7 +598,10 @@
 
             <!-- Pretraining Configuration -->
             <div class="config-section">
-                <h4 class="config-section-title">🔧 Pretraining Configuration</h4>
+                <h4 class="config-section-title">🔧 Step 1: Pretraining Configuration</h4>
+                <div style="background: #fef3c7; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #92400e;">
+                    ℹ️ These settings control the <strong>pretraining process</strong> (training the encoder alone before main training)
+                </div>
                 <div class="config-row">
                     <div class="config-group">
                         <label for="pretrainTaskType">Pretraining Task:</label>
@@ -607,29 +611,43 @@
                             <option value="puzzle_classification">Puzzle Classification</option>
                         </select>
                     </div>
-                    <div class="config-group">
-                        <label for="usePretrained" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="checkbox" id="usePretrained" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
-                            Use Pretrained Encoder
-                        </label>
-                    </div>
-                    <div class="config-group">
-                        <label for="freezeEncoder" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                            <input type="checkbox" id="freezeEncoder" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
-                            Freeze Encoder Weights
-                        </label>
-                    </div>
                 </div>
                 <div class="config-row" style="margin-top: 15px;">
                     <div class="config-group">
-                        <label for="loadPretrainedBefore">Load Before Pretrain:</label>
-                        <select id="loadPretrainedBefore" onchange="markConfigDirty()" style="min-width: 250px;">
-                            <option value="">None (train from scratch)</option>
+                        <label for="loadPretrainedBefore">📂 Load Checkpoint (optional - to continue pretraining):</label>
+                        <select id="loadPretrainedBefore" onchange="markConfigDirty()" style="min-width: 300px;">
+                            <option value="">None (start pretraining from scratch)</option>
                         </select>
                     </div>
                     <button onclick="refreshEncoderList()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
                         🔄 Refresh
                     </button>
+                </div>
+            </div>
+
+            <!-- Main Training Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">🚀 Step 2: Main Training Configuration</h4>
+                <div style="background: #dbeafe; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #1e40af;">
+                    ℹ️ These settings control the <strong>main training process</strong> (training the full communication system)
+                </div>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="usePretrained" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="usePretrained" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>📥 Load Pretrained Encoder (from Step 1)</span>
+                        </label>
+                        <span style="font-size: 12px; color: #6b7280; margin-left: 26px;">Initialize encoder with pretrained weights before main training</span>
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="freezeEncoder" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="freezeEncoder" onchange="markConfigDirty()" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>🔒 Freeze Encoder Weights During Main Training</span>
+                        </label>
+                        <span style="font-size: 12px; color: #6b7280; margin-left: 26px;">Prevent encoder updates during main training (recommended with pretrained encoder)</span>
+                    </div>
                 </div>
             </div>
 

@@ -41,11 +41,12 @@ training_state = {
     'batch_size': getattr(config, 'BATCH_SIZE', 32),
     'learning_rate': getattr(config, 'LEARNING_RATE', 1e-5),
     'pretrain_learning_rate': getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-4),
-    # Pretraining configuration
-    'pretrain_task_type': getattr(config, 'PRETRAIN_TASK_TYPE', 'binary'),
-    'use_pretrained': getattr(config, 'USE_PRETRAINED', True),
-    'freeze_encoder': getattr(config, 'FREEZE_ENCODER', False),
-    'load_pretrained_before_pretrain': None,  # Path to encoder to load before pretraining
+    # STEP 1: Pretraining configuration (affects pretraining process)
+    'pretrain_task_type': getattr(config, 'PRETRAIN_TASK_TYPE', 'binary'),  # Which pretraining task to use
+    'load_pretrained_before_pretrain': None,  # Path to encoder checkpoint to CONTINUE pretraining from
+    # STEP 2: Main training configuration (affects main training process)
+    'use_pretrained': getattr(config, 'USE_PRETRAINED', True),  # Whether to LOAD pretrained encoder for main training
+    'freeze_encoder': getattr(config, 'FREEZE_ENCODER', False),  # Whether to FREEZE encoder during main training
     # Training state
     'epoch': 0,
     'batch': 0,
@@ -414,23 +415,24 @@ def pretrain_worker():
         encoder = ARCEncoder(
             num_colors=config.NUM_COLORS,
             embedding_dim=config.EMBEDDING_DIM,
-            hidden_dim=config.HIDDEN_DIM,
-            latent_dim=config.LATENT_DIM,
-            num_conv_layers=config.NUM_CONV_LAYERS if hasattr(config, 'NUM_CONV_LAYERS') else 3
+            hidden_dim=training_state['hidden_dim'],
+            latent_dim=training_state['latent_dim'],
+            num_conv_layers=training_state['num_conv_layers']
         )
         
-        # Load pretrained encoder if specified
+        # PRETRAINING STEP 1: Optionally load a checkpoint to CONTINUE pretraining
+        # (This is different from main training's use_pretrained - this continues pretraining from a previous run)
         load_from_path = training_state.get('load_pretrained_before_pretrain')
         if load_from_path and os.path.exists(load_from_path):
-            print(f'Loading pretrained encoder from {load_from_path} before starting pretraining...')
+            print(f'[PRETRAIN] Loading checkpoint from {load_from_path} to continue pretraining...')
             checkpoint = torch.load(load_from_path, map_location='cpu')
             encoder.load_state_dict(checkpoint['encoder_state_dict'])
-            print(f"✓ Loaded pretrained encoder (continuing from checkpoint)")
+            print(f"[PRETRAIN] ✓ Loaded checkpoint - continuing pretraining from epoch {checkpoint.get('epoch', 0)}")
         elif load_from_path:
-            print(f'Warning: Pretrained encoder path specified but not found: {load_from_path}')
-            print('Starting pretraining from scratch')
+            print(f'[PRETRAIN] Warning: Checkpoint path specified but not found: {load_from_path}')
+            print('[PRETRAIN] Starting pretraining from scratch')
         else:
-            print('Starting pretraining from scratch (no pretrained encoder specified)')
+            print('[PRETRAIN] Starting pretraining from scratch (no checkpoint specified)')
         
         best_val_acc = 0.0
         
@@ -459,7 +461,7 @@ def pretrain_worker():
             
             train_loader = DataLoader(
                 train_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=True,
                 collate_fn=collate_fn_puzzle_classification,
                 num_workers=0
@@ -467,7 +469,7 @@ def pretrain_worker():
             
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=False,
                 collate_fn=collate_fn_puzzle_classification,
                 num_workers=0
@@ -475,7 +477,7 @@ def pretrain_worker():
             
             model = EncoderPuzzleClassifier(encoder, num_classes).to(device)
             criterion = nn.CrossEntropyLoss()
-            optimizer = optim.Adam(model.parameters(), lr=getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-3))
+            optimizer = optim.Adam(model.parameters(), lr=training_state['pretrain_learning_rate'])
             
             # Training loop for puzzle classification
             for epoch in range(num_epochs):
@@ -568,7 +570,7 @@ def pretrain_worker():
             
             train_loader = DataLoader(
                 train_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=True,
                 collate_fn=collate_fn_with_distractors,
                 num_workers=0
@@ -576,7 +578,7 @@ def pretrain_worker():
             
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=False,
                 collate_fn=collate_fn_with_distractors,
                 num_workers=0
@@ -586,11 +588,11 @@ def pretrain_worker():
                 encoder,
                 num_colors=config.NUM_COLORS,
                 embedding_dim=config.EMBEDDING_DIM,
-                hidden_dim=config.HIDDEN_DIM
+                hidden_dim=training_state['hidden_dim']
             ).to(device)
             
             criterion = nn.CrossEntropyLoss()
-            optimizer = optim.Adam(model.parameters(), lr=getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-3))
+            optimizer = optim.Adam(model.parameters(), lr=training_state['pretrain_learning_rate'])
             
             # Training loop for selection task
             for epoch in range(num_epochs):
@@ -695,7 +697,7 @@ def pretrain_worker():
             
             train_loader = DataLoader(
                 train_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=True,
                 collate_fn=collate_fn_with_labels,
                 num_workers=0
@@ -703,7 +705,7 @@ def pretrain_worker():
             
             val_loader = DataLoader(
                 val_dataset,
-                batch_size=config.BATCH_SIZE,
+                batch_size=training_state['batch_size'],
                 shuffle=False,
                 collate_fn=collate_fn_with_labels,
                 num_workers=0
@@ -711,7 +713,7 @@ def pretrain_worker():
             
             model = EncoderClassifier(encoder).to(device)
             criterion = nn.CrossEntropyLoss()
-            optimizer = optim.Adam(model.parameters(), lr=getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-3))
+            optimizer = optim.Adam(model.parameters(), lr=training_state['pretrain_learning_rate'])
             
             # Training loop for binary classification
             for epoch in range(num_epochs):
@@ -842,7 +844,7 @@ def train_worker():
         
         train_loader = DataLoader(
             train_dataset,
-            batch_size=config.BATCH_SIZE,
+            batch_size=training_state['batch_size'],
             shuffle=True,
             collate_fn=collate_fn_for_task,
             num_workers=0
@@ -850,7 +852,7 @@ def train_worker():
         
         val_loader = DataLoader(
             val_dataset,
-            batch_size=config.BATCH_SIZE,
+            batch_size=training_state['batch_size'],
             shuffle=False,
             collate_fn=collate_fn_for_task,
             num_workers=0
@@ -859,12 +861,13 @@ def train_worker():
         encoder = ARCEncoder(
             num_colors=config.NUM_COLORS,
             embedding_dim=config.EMBEDDING_DIM,
-            hidden_dim=config.HIDDEN_DIM,
-            latent_dim=config.LATENT_DIM,
-            num_conv_layers=config.NUM_CONV_LAYERS if hasattr(config, 'NUM_CONV_LAYERS') else 3
+            hidden_dim=training_state['hidden_dim'],
+            latent_dim=training_state['latent_dim'],
+            num_conv_layers=training_state['num_conv_layers']
         )
         
-        # Load pretrained encoder if available and enabled
+        # MAIN TRAINING STEP 1: Optionally load pretrained encoder from Step 1 (pretraining)
+        # (This initializes the encoder with weights learned during pretraining)
         use_pretrained = training_state['use_pretrained']
         
         # Determine which pretrained encoder to load based on pretrain_task_type
@@ -877,41 +880,42 @@ def train_worker():
             pretrained_path = os.path.join(config.SAVE_DIR, 'pretrained_encoder_binary.pth')
         
         if use_pretrained and os.path.exists(pretrained_path):
-            print(f'Loading pretrained encoder from {pretrained_path}...')
+            print(f'[MAIN TRAIN] Loading pretrained encoder from {pretrained_path}...')
             checkpoint = torch.load(pretrained_path, map_location='cpu')
             encoder.load_state_dict(checkpoint['encoder_state_dict'])
-            print(f"✓ Loaded pretrained encoder (task type: {pretrain_task_type})")
+            print(f"[MAIN TRAIN] ✓ Loaded pretrained encoder (task: {pretrain_task_type}, acc: {checkpoint.get('val_acc', 0):.2f}%)")
         elif use_pretrained:
-            print(f'Warning: Pretrained encoder requested but not found at {pretrained_path}')
-            print('Training from scratch')
+            print(f'[MAIN TRAIN] Warning: Pretrained encoder requested but not found at {pretrained_path}')
+            print('[MAIN TRAIN] Training from scratch instead')
         else:
-            print('Training from scratch (pretrained encoder disabled)')
+            print('[MAIN TRAIN] Training from scratch (pretrained encoder disabled)')
         
         model = ARCAutoencoder(
             encoder=encoder,
-            vocab_size=config.VOCAB_SIZE,
-            max_length=config.MAX_MESSAGE_LENGTH,
+            vocab_size=training_state['vocab_size'],
+            max_length=training_state['max_message_length'],
             num_colors=config.NUM_COLORS,
             embedding_dim=getattr(config, 'EMBEDDING_DIM', 16),
-            hidden_dim=config.HIDDEN_DIM,
+            hidden_dim=training_state['hidden_dim'],
             max_grid_size=config.MAX_GRID_SIZE,
-            bottleneck_type='communication',
+            bottleneck_type=training_state['bottleneck_type'],
             task_type=task_type,
-            num_conv_layers=config.NUM_CONV_LAYERS if hasattr(config, 'NUM_CONV_LAYERS') else 2,
+            num_conv_layers=training_state['num_conv_layers'],
             num_classes=num_classes  # For puzzle_classification task
         ).to(device)
         
-        # Freeze encoder if configured
+        # MAIN TRAINING STEP 2: Optionally freeze encoder weights during main training
+        # (This prevents the encoder from being updated - useful when using pretrained encoder)
         freeze_encoder = training_state.get('freeze_encoder', getattr(config, 'FREEZE_ENCODER', False))
         if freeze_encoder:
-            print('🔒 Freezing encoder weights')
+            print('[MAIN TRAIN] 🔒 Freezing encoder weights (encoder will NOT be updated during training)')
             for param in model.encoder.parameters():
                 param.requires_grad = False
         else:
-            print('🔓 Encoder weights will be updated')
+            print('[MAIN TRAIN] 🔓 Encoder weights will be updated during training')
         
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+        optimizer = optim.Adam(model.parameters(), lr=training_state['learning_rate'])
         
         for epoch in range(config.NUM_EPOCHS):
             if stop_flag.is_set():
@@ -950,7 +954,7 @@ def train_worker():
                 
                 if task_type == 'puzzle_classification':
                     # Puzzle classification task
-                    classification_logits, _, messages = model(grids, sizes, temperature=config.TEMPERATURE, labels=labels)
+                    classification_logits, _, messages = model(grids, sizes, temperature=training_state['temperature'], labels=labels)
                     
                     # Compute classification loss
                     loss = criterion(classification_logits, labels)
@@ -962,7 +966,7 @@ def train_worker():
                 elif task_type == 'selection':
                     # Selection task
                     selection_logits_list, actual_sizes, messages = model(
-                        grids, sizes, temperature=config.TEMPERATURE,
+                        grids, sizes, temperature=training_state['temperature'],
                         candidates_list=candidates_list, 
                         candidates_sizes_list=candidates_sizes_list,  # Add this parameter
                         target_indices=target_indices
@@ -984,7 +988,7 @@ def train_worker():
                     loss = batch_loss / len(selection_logits_list)
                 else:
                     # Reconstruction task
-                    logits_list, actual_sizes, messages = model(grids, sizes, temperature=config.TEMPERATURE)
+                    logits_list, actual_sizes, messages = model(grids, sizes, temperature=training_state['temperature'])
                     
                     batch_loss = 0
                     batch_correct = 0
