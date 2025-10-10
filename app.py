@@ -312,8 +312,6 @@ def get_classification_preview(model, grids, sizes, device):
     model.train()
     return preview
 
-
-
 def get_selections(model, batch_data, device, task_type):
     """Get selection data for visualization - rotates through different samples."""
     global training_state
@@ -321,7 +319,18 @@ def get_selections(model, batch_data, device, task_type):
     selections = []
     
     with torch.no_grad():
-        grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+        # Unpack based on whether we're using input-output pairs
+        use_input_output_pairs = training_state.get('use_input_output_pairs', False)
+        
+        if use_input_output_pairs:
+            # 7 elements: input and output grids separate
+            input_grids, input_sizes, output_grids, output_sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+            grids = input_grids  # Use input grids for sender encoding
+            sizes = input_sizes
+        else:
+            # 5 elements: original format (self-supervised)
+            grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+        
         grids = grids.to(device)
         candidates_list = [c.to(device) for c in candidates_list]
         target_indices = target_indices.to(device)
@@ -361,7 +370,9 @@ def get_selections(model, batch_data, device, task_type):
         # Get all candidate grids
         candidates_data = []
         for c_idx in range(len(candidates)):
-            cand_grid = candidates[c_idx][:actual_h, :actual_w].cpu().numpy()
+            # Get candidate size - it's the actual size of the candidate grid
+            c_h, c_w = candidate_sizes[c_idx]
+            cand_grid = candidates[c_idx][:c_h, :c_w].cpu().numpy()
             candidates_data.append({
                 'grid': cand_grid.tolist(),
                 'probability': float(probs[c_idx]),
@@ -821,12 +832,12 @@ def train_worker():
         track_puzzle_ids = task_type == 'puzzle_classification'
         use_input_output_pairs = training_state.get('use_input_output_pairs', False)
         
-        dataset = ARCDataset(  # or 'dataset' in train_worker
+        dataset = ARCDataset(
             config.DATA_PATH, 
             min_size=config.MIN_GRID_SIZE,
-            filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
-            max_grids=training_state['max_grids'],           # ✅ Read from training_state
-            num_distractors=num_distractors,     # (or num_distractors in train_worker)
+            filter_size=training_state['filter_grid_size'],
+            max_grids=training_state['max_grids'],
+            num_distractors=num_distractors,
             track_puzzle_ids=track_puzzle_ids,
             use_input_output_pairs=use_input_output_pairs
         )
@@ -839,6 +850,7 @@ def train_worker():
             print(f'Puzzle classification setup:')
             print(f'  - Number of puzzles: {num_puzzles}')
             print(f'  - Number of classes (inputs + outputs): {num_classes}')
+        
         train_size = int(0.8 * len(dataset))
         val_size = len(dataset) - train_size
         train_dataset, val_dataset = torch.utils.data.random_split(
@@ -877,7 +889,6 @@ def train_worker():
         )
         
         # MAIN TRAINING STEP 1: Optionally load pretrained encoder from Step 1 (pretraining)
-        # (This initializes the encoder with weights learned during pretraining)
         use_pretrained = training_state['use_pretrained']
         
         # Determine which pretrained encoder to load based on pretrain_task_type
@@ -911,11 +922,10 @@ def train_worker():
             bottleneck_type=training_state['bottleneck_type'],
             task_type=task_type,
             num_conv_layers=training_state['num_conv_layers'],
-            num_classes=num_classes  # For puzzle_classification task
+            num_classes=num_classes
         ).to(device)
         
         # MAIN TRAINING STEP 2: Optionally freeze encoder weights during main training
-        # (This prevents the encoder from being updated - useful when using pretrained encoder)
         freeze_encoder = training_state.get('freeze_encoder', getattr(config, 'FREEZE_ENCODER', False))
         if freeze_encoder:
             print('[MAIN TRAIN] 🔒 Freezing encoder weights (encoder will NOT be updated during training)')
@@ -942,29 +952,50 @@ def train_worker():
                 if stop_flag.is_set():
                     break
                 
-                # Unpack based on task type
-                if task_type == 'selection':
-                    grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
-                    grids = grids.to(device)
-                    candidates_list = [c.to(device) for c in candidates_list]
-                    target_indices = target_indices.to(device)
-                elif task_type == 'puzzle_classification':
-                    grids, sizes, labels = batch_data
-                    grids = grids.to(device)
-                    labels = labels.to(device)
+                # Unpack batch based on task type and use_input_output_pairs
+                if use_input_output_pairs:
+                    if task_type == 'selection':
+                        input_grids, input_sizes, output_grids, output_sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                        input_grids = input_grids.to(device)
+                        output_grids = output_grids.to(device)
+                        candidates_list = [c.to(device) for c in candidates_list]
+                        target_indices = target_indices.to(device)
+                    else:  # reconstruction
+                        input_grids, input_sizes, output_grids, output_sizes = batch_data
+                        input_grids = input_grids.to(device)
+                        output_grids = output_grids.to(device)
+                        candidates_list = None
+                        target_indices = None
                 else:
-                    grids, sizes = batch_data
-                    grids = grids.to(device)
-                    candidates_list = None
-                    target_indices = None
+                    # Original behavior (self-supervised)
+                    if task_type == 'selection':
+                        grids, sizes, candidates_list, candidates_sizes_list, target_indices = batch_data
+                        grids = grids.to(device)
+                        candidates_list = [c.to(device) for c in candidates_list]
+                        target_indices = target_indices.to(device)
+                        input_grids = grids
+                        input_sizes = sizes
+                    elif task_type == 'puzzle_classification':
+                        grids, sizes, labels = batch_data
+                        grids = grids.to(device)
+                        labels = labels.to(device)
+                        input_grids = grids
+                        input_sizes = sizes
+                    else:
+                        grids, sizes = batch_data
+                        grids = grids.to(device)
+                        candidates_list = None
+                        target_indices = None
+                        input_grids = grids
+                        input_sizes = sizes
                 
                 training_state['batch'] = batch_idx + 1
                 
                 optimizer.zero_grad()
                 
                 if task_type == 'puzzle_classification':
-                    # Puzzle classification task
-                    classification_logits, _, messages = model(grids, sizes, temperature=training_state['temperature'], labels=labels)
+                    # Puzzle classification task (no I/O pairs)
+                    classification_logits, _, messages = model(input_grids, input_sizes, temperature=training_state['temperature'], labels=labels)
                     
                     # Compute classification loss
                     loss = criterion(classification_logits, labels)
@@ -976,9 +1007,9 @@ def train_worker():
                 elif task_type == 'selection':
                     # Selection task
                     selection_logits_list, actual_sizes, messages = model(
-                        grids, sizes, temperature=training_state['temperature'],
+                        input_grids, input_sizes, temperature=training_state['temperature'],
                         candidates_list=candidates_list, 
-                        candidates_sizes_list=candidates_sizes_list,  # Add this parameter
+                        candidates_sizes_list=candidates_sizes_list,
                         target_indices=target_indices
                     )
                     
@@ -998,29 +1029,60 @@ def train_worker():
                     loss = batch_loss / len(selection_logits_list)
                 else:
                     # Reconstruction task
-                    logits_list, actual_sizes, messages = model(grids, sizes, temperature=training_state['temperature'])
-                    
-                    batch_loss = 0
-                    batch_correct = 0
-                    batch_total = 0
-                    
-                    for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
-                        actual_h, actual_w = sizes[sample_idx]
-                        H, W = logits.shape[2], logits.shape[3]
+                    if use_input_output_pairs:
+                        # Use input to generate message, reconstruct output
+                        logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=training_state['temperature'])
                         
-                        target_grid = grids[sample_idx:sample_idx+1, :H, :W]
-                        logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
-                        targets_flat = target_grid.reshape(-1)
+                        # Compute reconstruction loss for each sample (target is OUTPUT)
+                        batch_loss = 0
+                        batch_correct = 0
+                        batch_total = 0
                         
-                        sample_loss = criterion(logits_flat, targets_flat)
-                        batch_loss += sample_loss
+                        for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                            actual_h, actual_w = output_sizes[sample_idx]  # Use OUTPUT size
+                            H, W = logits.shape[2], logits.shape[3]
+                            
+                            target_grid = output_grids[sample_idx:sample_idx+1, :H, :W]  # Use OUTPUT grid
+                            
+                            logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                            targets_flat = target_grid.reshape(-1)
+                            
+                            sample_loss = criterion(logits_flat, targets_flat)
+                            batch_loss += sample_loss
+                            
+                            pred = logits.argmax(dim=1).squeeze(0)
+                            target = target_grid.squeeze(0)
+                            batch_correct += (pred == target).sum().item()
+                            batch_total += target.numel()
                         
-                        pred = logits.argmax(dim=1).squeeze(0)
-                        target = target_grid.squeeze(0)
-                        batch_correct += (pred == target).sum().item()
-                        batch_total += target.numel()
-                    
-                    loss = batch_loss / len(logits_list)
+                        loss = batch_loss / len(logits_list)
+                    else:
+                        # Original: reconstruct the same grid
+                        logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        
+                        # Compute reconstruction loss for each sample
+                        batch_loss = 0
+                        batch_correct = 0
+                        batch_total = 0
+                        
+                        for sample_idx, (logits, (actual_h, actual_w)) in enumerate(zip(logits_list, actual_sizes)):
+                            actual_h, actual_w = input_sizes[sample_idx]
+                            H, W = logits.shape[2], logits.shape[3]
+                            
+                            target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                            
+                            logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                            targets_flat = target_grid.reshape(-1)
+                            
+                            sample_loss = criterion(logits_flat, targets_flat)
+                            batch_loss += sample_loss
+                            
+                            pred = logits.argmax(dim=1).squeeze(0)
+                            target = target_grid.squeeze(0)
+                            batch_correct += (pred == target).sum().item()
+                            batch_total += target.numel()
+                        
+                        loss = batch_loss / len(logits_list)
                 
                 loss.backward()
                 optimizer.step()
@@ -1051,24 +1113,31 @@ def train_worker():
                     if task_type == 'selection':
                         results = get_selections(model, batch_data, device, task_type)
                     elif task_type == 'puzzle_classification':
-                        results = get_classification_preview(model, grids, sizes, device)
+                        results = get_classification_preview(model, input_grids, input_sizes, device)
                     else:
-                        results = get_reconstructions(model, grids, sizes, device, num_samples=1)
+                        results = get_reconstructions(model, input_grids, input_sizes, device, num_samples=1)
                     reconstructions_queue.put(results)
                     
                     # Validation batch visualization
                     for val_batch in val_loader:
                         if task_type == 'selection':
-                            val_grids = val_batch[0].to(device)
                             results = get_selections(model, val_batch, device, task_type)
                         elif task_type == 'puzzle_classification':
-                            val_grids, val_sizes, val_labels = val_batch
-                            val_grids = val_grids.to(device)
+                            if use_input_output_pairs:
+                                val_grids = val_batch[0].to(device)
+                                val_sizes = val_batch[1]
+                            else:
+                                val_grids, val_sizes, val_labels = val_batch
+                                val_grids = val_grids.to(device)
                             results = get_classification_preview(model, val_grids, val_sizes, device)
                         else:
-                            val_grids, val_sizes = val_batch
-                            val_grids = val_grids.to(device)
-                            results = get_reconstructions(model, val_grids, val_sizes, device, num_samples=1)
+                            if use_input_output_pairs:
+                                val_input_grids = val_batch[0].to(device)
+                                val_input_sizes = val_batch[1]
+                            else:
+                                val_input_grids, val_input_sizes = val_batch
+                                val_input_grids = val_input_grids.to(device)
+                            results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
                         reconstructions_queue.put(results)
                         break
                         
@@ -1080,8 +1149,6 @@ def train_worker():
         training_state['running'] = False
         training_state['mode'] = None
         metrics_queue.put({'status': 'error', 'message': str(e)})
-
-
 
 @app.route('/')
 def index():

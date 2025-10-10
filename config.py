@@ -15,7 +15,7 @@ MAX_GRID_SIZE = 30  # Maximum grid size for reconstruction
 NUM_CONV_LAYERS = 3  # Number of convolutional layers in encoder (1-3 recommended)
 
 # Bottleneck Type
-BOTTLENECK_TYPE = 'autoencoder'  # 'communication' or 'autoencoder'
+BOTTLENECK_TYPE = 'communication'  # 'communication' or 'autoencoder'
 
 # Task Type
 TASK_TYPE = 'selection'  # 'reconstruction', 'selection', or 'puzzle_classification'
@@ -23,8 +23,8 @@ NUM_DISTRACTORS = 1  # Number of distractor grids for selection task (actual num
 USE_INPUT_OUTPUT_PAIRS = True  # If True, train on input→output transformations (requires reconstruction or selection task)
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
-VOCAB_SIZE = 100  # Size of discrete symbol vocabulary
-MAX_MESSAGE_LENGTH = 3  # Maximum length of message sequences
+VOCAB_SIZE = 25  # Size of discrete symbol vocabulary
+MAX_MESSAGE_LENGTH = 2  # Maximum length of message sequences
 TEMPERATURE = 1.0  # Gumbel-softmax temperature
 
 # Loss weights
