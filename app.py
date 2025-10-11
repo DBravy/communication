@@ -42,6 +42,8 @@ training_state = {
     'batch_size': getattr(config, 'BATCH_SIZE', 32),
     'learning_rate': getattr(config, 'LEARNING_RATE', 1e-5),
     'pretrain_learning_rate': getattr(config, 'PRETRAIN_LEARNING_RATE', 1e-4),
+    'num_epochs': getattr(config, 'NUM_EPOCHS', 10000),
+    'pretrain_epochs': getattr(config, 'PRETRAIN_EPOCHS', 1000000),
     # STEP 1: Pretraining configuration (affects pretraining process)
     'pretrain_task_type': getattr(config, 'PRETRAIN_TASK_TYPE', 'binary'),  # Which pretraining task to use
     'load_pretrained_before_pretrain': None,  # Path to encoder checkpoint to CONTINUE pretraining from
@@ -438,7 +440,7 @@ def pretrain_worker():
         
         # Get pretraining task type from training_state
         pretrain_task_type = training_state['pretrain_task_type']
-        num_epochs = getattr(config, 'PRETRAIN_EPOCHS', 20)
+        num_epochs = training_state['pretrain_epochs']
         
         # Determine num_distractors and track_puzzle_ids for dataset
         if pretrain_task_type == 'selection':
@@ -977,7 +979,7 @@ def train_worker():
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=training_state['learning_rate'])
         
-        for epoch in range(config.NUM_EPOCHS):
+        for epoch in range(training_state['num_epochs']):
             if stop_flag.is_set():
                 break
             
@@ -1331,6 +1333,8 @@ def get_task_config():
         'batch_size': training_state['batch_size'],
         'learning_rate': training_state['learning_rate'],
         'pretrain_learning_rate': training_state['pretrain_learning_rate'],
+        'num_epochs': training_state['num_epochs'],
+        'pretrain_epochs': training_state['pretrain_epochs'],
         # Pretraining configuration
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
@@ -1386,6 +1390,10 @@ def set_task_config():
         training_state['learning_rate'] = float(data['learning_rate'])
     if 'pretrain_learning_rate' in data:
         training_state['pretrain_learning_rate'] = float(data['pretrain_learning_rate'])
+    if 'num_epochs' in data:
+        training_state['num_epochs'] = int(data['num_epochs'])
+    if 'pretrain_epochs' in data:
+        training_state['pretrain_epochs'] = int(data['pretrain_epochs'])
     
     # Pretraining configuration
     if 'pretrain_task_type' in data:
@@ -1414,6 +1422,8 @@ def set_task_config():
         'batch_size': training_state['batch_size'],
         'learning_rate': training_state['learning_rate'],
         'pretrain_learning_rate': training_state['pretrain_learning_rate'],
+        'num_epochs': training_state['num_epochs'],
+        'pretrain_epochs': training_state['pretrain_epochs'],
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
         'freeze_encoder': training_state['freeze_encoder'],

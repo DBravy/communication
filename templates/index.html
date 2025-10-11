@@ -601,6 +601,16 @@
                         <input type="number" id="pretrainLearningRate" min="0.000001" max="0.1" step="0.000001" value="0.0001" onchange="markConfigDirty()">
                     </div>
                 </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="numEpochs">Main Training Epochs:</label>
+                        <input type="number" id="numEpochs" min="1" max="1000000" value="10000" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="pretrainEpochs">Pretraining Epochs:</label>
+                        <input type="number" id="pretrainEpochs" min="1" max="10000000" value="1000000" onchange="markConfigDirty()">
+                    </div>
+                </div>
             </div>
 
             <!-- Pretraining Configuration -->
@@ -780,6 +790,8 @@
                 document.getElementById('batchSize').value = data.batch_size || 32;
                 document.getElementById('learningRate').value = data.learning_rate || 0.00001;
                 document.getElementById('pretrainLearningRate').value = data.pretrain_learning_rate || 0.0001;
+                document.getElementById('numEpochs').value = data.num_epochs || 10000;
+                document.getElementById('pretrainEpochs').value = data.pretrain_epochs || 1000000;
                 
                 // Pretraining configuration
                 document.getElementById('pretrainTaskType').value = data.pretrain_task_type || 'binary';
@@ -905,6 +917,8 @@
             const batchSize = document.getElementById('batchSize').value;
             const learningRate = document.getElementById('learningRate').value;
             const pretrainLearningRate = document.getElementById('pretrainLearningRate').value;
+            const numEpochs = document.getElementById('numEpochs').value;
+            const pretrainEpochs = document.getElementById('pretrainEpochs').value;
             
             // Pretraining configuration
             const pretrainTaskType = document.getElementById('pretrainTaskType').value;
@@ -931,6 +945,8 @@
                     batch_size: parseInt(batchSize),
                     learning_rate: parseFloat(learningRate),
                     pretrain_learning_rate: parseFloat(pretrainLearningRate),
+                    num_epochs: parseInt(numEpochs),
+                    pretrain_epochs: parseInt(pretrainEpochs),
                     pretrain_task_type: pretrainTaskType,
                     use_pretrained: usePretrained,
                     freeze_encoder: freezeEncoder,
