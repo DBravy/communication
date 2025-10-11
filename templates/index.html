@@ -797,6 +797,10 @@
                         document.getElementById('loadPretrainedBefore').value = data.load_pretrained_before_pretrain;
                     }
                 });
+            })
+            .then(() => {
+                // Load historical metrics after config is loaded
+                loadMetricsHistory();
             });
         
         function markConfigDirty() {
@@ -1210,6 +1214,61 @@
             lossChart.update('none');
             accuracyChart.update('none');
             lastRenderTime = now;
+        }
+        
+        // Load historical metrics on page load
+        function loadMetricsHistory() {
+            fetch('/metrics_history')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.history && data.history.length > 0) {
+                        console.log(`Loading ${data.history.length} historical data points...`);
+                        
+                        // Process each historical point
+                        data.history.forEach((point, idx) => {
+                            batchCounter++;
+                            const label = batchCounter.toString();
+                            
+                            // Store raw data (for moving average calculation)
+                            rawLossData.push(point.loss);
+                            rawAccuracyData.push(point.accuracy);
+                            // Keep only last MOVING_AVG_WINDOW points in raw data
+                            if (rawLossData.length > MOVING_AVG_WINDOW) rawLossData.shift();
+                            if (rawAccuracyData.length > MOVING_AVG_WINDOW) rawAccuracyData.shift();
+                            
+                            // Calculate moving averages
+                            const lossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+                            const accuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+                            
+                            // Add to charts
+                            lossChart.data.labels.push(label);
+                            lossChart.data.datasets[0].data.push(lossMA);
+                            accuracyChart.data.labels.push(label);
+                            accuracyChart.data.datasets[0].data.push(accuracyMA);
+                        });
+                        
+                        // Apply decimation if needed
+                        downsampleChart(lossChart, MAX_POINTS);
+                        downsampleChart(accuracyChart, MAX_POINTS);
+                        
+                        // Update charts
+                        lossChart.update('none');
+                        accuracyChart.update('none');
+                        
+                        // Update display values
+                        if (rawLossData.length > 0) {
+                            const finalLossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+                            const finalAccuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+                            document.getElementById('lossValue').textContent = finalLossMA.toFixed(3);
+                            document.getElementById('accValue').textContent = finalAccuracyMA.toFixed(2) + '%';
+                        }
+                        
+                        console.log('Historical data loaded successfully');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading metrics history:', error);
+                });
         }
 
         // In-place decimation keeping recent half at full resolution and halving density of older half

@@ -64,6 +64,37 @@ reconstructions_queue = queue.Queue()
 stop_flag = threading.Event()
 status_queue = queue.Queue()
 
+# Store historical metrics for persistence across page reloads
+# Limit to 5000 points to avoid excessive memory usage
+MAX_HISTORY_POINTS = 5000
+metrics_history = []  # List of {'batch_num': int, 'loss': float, 'accuracy': float}
+history_lock = threading.Lock()
+
+def add_metrics_to_history(epoch, batch, loss, accuracy):
+    """Add metrics to history with automatic pruning to stay under MAX_HISTORY_POINTS."""
+    global metrics_history
+    with history_lock:
+        # Calculate a global batch number for consistent x-axis
+        batch_num = (epoch - 1) * 1000 + batch  # Rough estimate
+        
+        metrics_history.append({
+            'batch_num': batch_num,
+            'loss': float(loss),
+            'accuracy': float(accuracy)
+        })
+        
+        # Prune old data if we exceed the limit
+        # Keep more recent data and decimate older data
+        if len(metrics_history) > MAX_HISTORY_POINTS:
+            # Keep the most recent half at full resolution
+            keep_recent = MAX_HISTORY_POINTS // 2
+            recent_data = metrics_history[-keep_recent:]
+            
+            # Decimate the older half (keep every other point)
+            older_data = metrics_history[:-keep_recent:2]
+            
+            metrics_history = older_data + recent_data
+
 class NoiseGridDataset(Dataset):
     """Generates random noise grids."""
     def __init__(self, num_samples=10000, min_size=3, max_size=30, num_colors=10):
@@ -537,6 +568,9 @@ def pretrain_worker():
                         'accuracy': accuracy
                     }
                     
+                    # Add to persistent history
+                    add_metrics_to_history(epoch + 1, batch_idx + 1, avg_loss, accuracy)
+                    
                     metrics_queue.put({
                         'epoch': epoch + 1,
                         'batch': batch_idx + 1,
@@ -659,6 +693,9 @@ def pretrain_worker():
                         'accuracy': accuracy
                     }
                     
+                    # Add to persistent history
+                    add_metrics_to_history(epoch + 1, batch_idx + 1, avg_loss, accuracy)
+                    
                     metrics_queue.put({
                         'epoch': epoch + 1,
                         'batch': batch_idx + 1,
@@ -772,6 +809,9 @@ def pretrain_worker():
                         'loss': avg_loss,
                         'accuracy': accuracy
                     }
+                    
+                    # Add to persistent history
+                    add_metrics_to_history(epoch + 1, batch_idx + 1, avg_loss, accuracy)
                     
                     metrics_queue.put({
                         'epoch': epoch + 1,
@@ -1173,13 +1213,18 @@ def start_pretrain():
     training_state['batch'] = 0
     training_state['viz_sample_idx'] = 0
     
-    # Clear queues
+    # Clear queues and history
     while not metrics_queue.empty():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
+    
+    # Clear metrics history for new training run
+    global metrics_history
+    with history_lock:
+        metrics_history = []
     
     training_thread = threading.Thread(target=pretrain_worker)
     training_thread.start()
@@ -1207,13 +1252,18 @@ def start_train():
     training_state['batch'] = 0
     training_state['viz_sample_idx'] = 0
     
-    # Clear queues
+    # Clear queues and history
     while not metrics_queue.empty():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
+    
+    # Clear metrics history for new training run
+    global metrics_history
+    with history_lock:
+        metrics_history = []
     
     training_thread = threading.Thread(target=train_worker)
     training_thread.start()
@@ -1245,6 +1295,17 @@ def stop_training():
 @app.route('/status')
 def get_status():
     return jsonify(training_state)
+
+
+@app.route('/metrics_history')
+def get_metrics_history():
+    """Fetch historical metrics for populating charts on page load."""
+    with history_lock:
+        return jsonify({
+            'history': metrics_history,
+            'running': training_state['running'],
+            'mode': training_state['mode']
+        })
 
 
 @app.route('/task_config', methods=['GET'])
