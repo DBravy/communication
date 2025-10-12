@@ -18,6 +18,72 @@ from model import ARCEncoder, ARCAutoencoder
 
 app = Flask(__name__)
 
+# Utility function for saving checkpoints with full config
+def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, training_state, val_loss=None, val_acc=None):
+    """Save a complete checkpoint with model, optimizer, and all configuration."""
+    os.makedirs(config.SAVE_DIR, exist_ok=True)
+    
+    # Sanitize checkpoint name (remove invalid characters)
+    safe_name = "".join(c for c in checkpoint_name if c.isalnum() or c in (' ', '-', '_')).strip()
+    if not safe_name:
+        safe_name = f"checkpoint_{epoch}_{batch}"
+    
+    checkpoint_path = os.path.join(config.SAVE_DIR, f'{safe_name}.pth')
+    
+    # Build comprehensive checkpoint data
+    checkpoint_data = {
+        # Training state
+        'epoch': epoch,
+        'batch': batch,
+        'val_loss': val_loss,
+        'val_acc': val_acc,
+        
+        # Model and optimizer
+        'model_state_dict': model.state_dict(),
+        'encoder_state_dict': model.encoder.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict() if optimizer is not None else None,
+        
+        # Task configuration
+        'task_type': training_state['task_type'],
+        'num_distractors': training_state['num_distractors'],
+        'bottleneck_type': training_state['bottleneck_type'],
+        'use_input_output_pairs': training_state['use_input_output_pairs'],
+        
+        # Data configuration
+        'max_grids': training_state['max_grids'],
+        'filter_grid_size': training_state['filter_grid_size'],
+        
+        # Model architecture
+        'hidden_dim': training_state['hidden_dim'],
+        'latent_dim': training_state['latent_dim'],
+        'num_conv_layers': training_state['num_conv_layers'],
+        
+        # Communication protocol
+        'vocab_size': training_state['vocab_size'],
+        'max_message_length': training_state['max_message_length'],
+        'temperature': training_state['temperature'],
+        
+        # Training hyperparameters
+        'batch_size': training_state['batch_size'],
+        'learning_rate': training_state['learning_rate'],
+        'pretrain_learning_rate': training_state['pretrain_learning_rate'],
+        'num_epochs': training_state['num_epochs'],
+        'pretrain_epochs': training_state['pretrain_epochs'],
+        
+        # Pretraining configuration
+        'pretrain_task_type': training_state['pretrain_task_type'],
+        'use_pretrained': training_state['use_pretrained'],
+        'freeze_encoder': training_state['freeze_encoder'],
+        
+        # Static config values
+        'num_colors': config.NUM_COLORS,
+        'embedding_dim': config.EMBEDDING_DIM,
+        'max_grid_size': config.MAX_GRID_SIZE,
+    }
+    
+    torch.save(checkpoint_data, checkpoint_path)
+    return checkpoint_path
+
 # Global state
 training_state = {
     'running': False,
@@ -65,6 +131,7 @@ metrics_queue = queue.Queue()
 reconstructions_queue = queue.Queue()
 stop_flag = threading.Event()
 status_queue = queue.Queue()
+save_checkpoint_queue = queue.Queue()  # Queue for checkpoint save requests
 
 # Store historical metrics for persistence across page reloads
 # Limit to 5000 points to avoid excessive memory usage
@@ -1147,6 +1214,40 @@ def train_worker():
                     'metrics': training_state['metrics']
                 })
                 
+                # Check for checkpoint save requests
+                try:
+                    while not save_checkpoint_queue.empty():
+                        checkpoint_request = save_checkpoint_queue.get_nowait()
+                        checkpoint_name = checkpoint_request.get('name', f'manual_epoch_{epoch+1}_batch_{batch_idx+1}')
+                        try:
+                            saved_path = save_full_checkpoint(
+                                model=model,
+                                optimizer=optimizer,
+                                epoch=epoch + 1,
+                                batch=batch_idx + 1,
+                                checkpoint_name=checkpoint_name,
+                                training_state=training_state,
+                                val_loss=None,  # Could compute validation loss if needed
+                                val_acc=None
+                            )
+                            status_queue.put({
+                                'status': 'checkpoint_saved',
+                                'checkpoint_name': checkpoint_name,
+                                'path': saved_path,
+                                'epoch': epoch + 1,
+                                'batch': batch_idx + 1
+                            })
+                            print(f'\n✓ Saved checkpoint: {checkpoint_name}')
+                        except Exception as e:
+                            status_queue.put({
+                                'status': 'checkpoint_error',
+                                'message': str(e),
+                                'checkpoint_name': checkpoint_name
+                            })
+                            print(f'\n✗ Failed to save checkpoint {checkpoint_name}: {e}')
+                except queue.Empty:
+                    pass
+                
                 time.sleep(0.01)
                 
                 # Visualization at epoch level
@@ -1222,6 +1323,8 @@ def start_pretrain():
         reconstructions_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
+    while not save_checkpoint_queue.empty():
+        save_checkpoint_queue.get()
     
     # Clear metrics history for new training run
     global metrics_history
@@ -1261,6 +1364,8 @@ def start_train():
         reconstructions_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
+    while not save_checkpoint_queue.empty():
+        save_checkpoint_queue.get()
     
     # Clear metrics history for new training run
     global metrics_history
@@ -1468,6 +1573,88 @@ def list_pretrained_encoders():
                     })
     
     return jsonify({'encoders': encoders})
+
+
+@app.route('/save_checkpoint', methods=['POST'])
+def request_checkpoint_save():
+    """Request a checkpoint save during training."""
+    global training_state
+    
+    if not training_state['running']:
+        return jsonify({'error': 'Training is not running'}), 400
+    
+    if training_state['mode'] != 'train':
+        return jsonify({'error': 'Checkpoint saving is only available during main training (not pretraining)'}), 400
+    
+    data = json.loads(request.data) if request.data else {}
+    checkpoint_name = data.get('name', f"manual_checkpoint_epoch_{training_state['epoch']}")
+    
+    # Add request to the queue
+    save_checkpoint_queue.put({'name': checkpoint_name})
+    
+    return jsonify({
+        'status': 'requested',
+        'checkpoint_name': checkpoint_name,
+        'message': f'Checkpoint save requested: {checkpoint_name}'
+    })
+
+
+@app.route('/list_checkpoints', methods=['GET'])
+def list_all_checkpoints():
+    """List all saved checkpoints (not just pretrained encoders)."""
+    checkpoints = []
+    checkpoint_dir = config.SAVE_DIR
+    
+    if os.path.exists(checkpoint_dir):
+        for filename in os.listdir(checkpoint_dir):
+            if filename.endswith('.pth'):
+                filepath = os.path.join(checkpoint_dir, filename)
+                try:
+                    # Get file stats
+                    file_stat = os.stat(filepath)
+                    file_size_mb = file_stat.st_size / (1024 * 1024)
+                    modified_time = time.strftime('%Y-%m-%d %H:%M:%S', 
+                                                  time.localtime(file_stat.st_mtime))
+                    
+                    # Try to load checkpoint to get metadata
+                    checkpoint = torch.load(filepath, map_location='cpu')
+                    
+                    checkpoint_info = {
+                        'filename': filename,
+                        'path': filepath,
+                        'size_mb': round(file_size_mb, 2),
+                        'modified': modified_time,
+                        'epoch': checkpoint.get('epoch', 0),
+                        'batch': checkpoint.get('batch', 0),
+                        'task_type': checkpoint.get('task_type', checkpoint.get('pretrain_task_type', 'unknown')),
+                        'bottleneck_type': checkpoint.get('bottleneck_type', 'unknown'),
+                        'val_loss': checkpoint.get('val_loss'),
+                        'val_acc': checkpoint.get('val_acc'),
+                    }
+                    
+                    # Add additional metadata if available
+                    if 'hidden_dim' in checkpoint:
+                        checkpoint_info['hidden_dim'] = checkpoint['hidden_dim']
+                    if 'latent_dim' in checkpoint:
+                        checkpoint_info['latent_dim'] = checkpoint['latent_dim']
+                    if 'vocab_size' in checkpoint:
+                        checkpoint_info['vocab_size'] = checkpoint['vocab_size']
+                    
+                    checkpoints.append(checkpoint_info)
+                except Exception as e:
+                    # If we can't load it, still list it with basic info
+                    checkpoints.append({
+                        'filename': filename,
+                        'path': filepath,
+                        'size_mb': round(file_size_mb, 2),
+                        'modified': modified_time,
+                        'error': f'Could not load checkpoint: {str(e)}'
+                    })
+    
+    # Sort by modification time (newest first)
+    checkpoints.sort(key=lambda x: x.get('modified', ''), reverse=True)
+    
+    return jsonify({'checkpoints': checkpoints})
 
 
 @app.route('/stream')

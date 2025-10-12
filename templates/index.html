@@ -166,9 +166,53 @@
             box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);
         }
         
+        .btn-save-checkpoint {
+            background: #8b5cf6;
+            color: white;
+        }
+        
+        .btn-save-checkpoint:hover:not(:disabled) {
+            background: #7c3aed;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(139, 92, 246, 0.3);
+        }
+        
         button:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-weight: 600;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .notification-error {
+            background: #ef4444;
+            color: white;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
         
         .status-display {
@@ -687,6 +731,9 @@
                 </button>
                 <button class="btn-stop" id="stopBtn" onclick="stopTraining()" disabled>
                     Stop Training
+                </button>
+                <button class="btn-save-checkpoint" id="saveCheckpointBtn" onclick="saveCheckpoint()" disabled style="background: #8b5cf6; color: white;">
+                    💾 Save Checkpoint
                 </button>
             </div>
             
@@ -1393,6 +1440,7 @@
                         document.getElementById('pretrainBtn').disabled = true;
                         document.getElementById('trainBtn').disabled = true;
                         document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('saveCheckpointBtn').disabled = true;  // Disabled during pretraining
                         document.getElementById('statusText').textContent = 'Running';
                         document.getElementById('statusIndicator').className = 'status-indicator status-pretraining';
                         document.getElementById('modeBadge').className = 'mode-badge mode-pretrain';
@@ -1427,6 +1475,7 @@
                         document.getElementById('pretrainBtn').disabled = true;
                         document.getElementById('trainBtn').disabled = true;
                         document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('saveCheckpointBtn').disabled = false;  // Enabled during main training
                         document.getElementById('statusText').textContent = 'Running';
                         document.getElementById('statusIndicator').className = 'status-indicator status-running';
                         document.getElementById('modeBadge').className = 'mode-badge mode-train';
@@ -1452,6 +1501,7 @@
                         document.getElementById('pretrainBtn').disabled = false;
                         document.getElementById('trainBtn').disabled = false;
                         document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('saveCheckpointBtn').disabled = true;
                         document.getElementById('statusText').textContent = 'Stopped';
                         document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
                         document.getElementById('modeBadge').className = 'mode-badge hidden';
@@ -1459,6 +1509,56 @@
                     }
                 })
                 .catch(error => console.error('Error:', error));
+        }
+        
+        function showNotification(message, type = 'success') {
+            // Remove any existing notifications
+            const existingNotifications = document.querySelectorAll('.notification');
+            existingNotifications.forEach(n => n.remove());
+            
+            // Create new notification
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+        
+        function saveCheckpoint() {
+            const checkpointName = prompt('Enter checkpoint name:', `checkpoint_epoch_${document.getElementById('epochDisplay').textContent}`);
+            
+            if (checkpointName === null) {
+                // User cancelled
+                return;
+            }
+            
+            if (!checkpointName.trim()) {
+                showNotification('Please enter a valid checkpoint name', 'error');
+                return;
+            }
+            
+            fetch('/save_checkpoint', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: checkpointName.trim() })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showNotification('Error: ' + data.error, 'error');
+                } else {
+                    showNotification(`✓ Checkpoint save requested: ${data.checkpoint_name}`, 'success');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving checkpoint:', error);
+                showNotification('Failed to save checkpoint', 'error');
+            });
         }
         
         const eventSource = new EventSource('/stream');
@@ -1470,6 +1570,20 @@
                 return;
             }
             
+            if (message.type === 'status') {
+                const data = message.data;
+                
+                if (data.status === 'checkpoint_saved') {
+                    showNotification(`✓ Checkpoint saved: ${data.checkpoint_name} (Epoch ${data.epoch}, Batch ${data.batch})`, 'success');
+                    return;
+                }
+                
+                if (data.status === 'checkpoint_error') {
+                    showNotification(`✗ Failed to save checkpoint: ${data.message}`, 'error');
+                    return;
+                }
+            }
+            
             if (message.type === 'metrics') {
                 const data = message.data;
                 
@@ -1477,6 +1591,7 @@
                     document.getElementById('pretrainBtn').disabled = false;
                     document.getElementById('trainBtn').disabled = false;
                     document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('saveCheckpointBtn').disabled = true;
                     document.getElementById('statusText').textContent = 'Completed';
                     document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
                     document.getElementById('modeBadge').className = 'mode-badge hidden';
@@ -1492,6 +1607,7 @@
                     document.getElementById('pretrainBtn').disabled = false;
                     document.getElementById('trainBtn').disabled = false;
                     document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('saveCheckpointBtn').disabled = true;
                     document.getElementById('statusText').textContent = 'Error';
                     document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
                     document.getElementById('modeBadge').className = 'mode-badge hidden';
@@ -1527,15 +1643,18 @@
                             document.getElementById('statusIndicator').className = 'status-indicator status-pretraining';
                             document.getElementById('modeBadge').className = 'mode-badge mode-pretrain';
                             document.getElementById('modeBadge').textContent = 'PRETRAINING';
+                            document.getElementById('saveCheckpointBtn').disabled = true;  // Disabled during pretraining
                         } else if (data.mode === 'train') {
                             document.getElementById('statusIndicator').className = 'status-indicator status-running';
                             document.getElementById('modeBadge').className = 'mode-badge mode-train';
                             document.getElementById('modeBadge').textContent = 'MAIN TRAINING';
+                            document.getElementById('saveCheckpointBtn').disabled = false;  // Enabled during main training
                         }
                     } else {
                         document.getElementById('pretrainBtn').disabled = false;
                         document.getElementById('trainBtn').disabled = false;
                         document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('saveCheckpointBtn').disabled = true;  // Disabled when not training
                     }
                 })
                 .catch(error => console.error('Error:', error));
