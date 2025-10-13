@@ -597,6 +597,22 @@
                 <h4 class="config-section-title">📁 Data Configuration</h4>
                 <div class="config-row">
                     <div class="config-group">
+                        <label for="datasetVersion">Dataset Version:</label>
+                        <select id="datasetVersion" onchange="markConfigDirty()">
+                            <option value="V1">V1 (400 training / 400 eval)</option>
+                            <option value="V2" selected>V2 (1000 training / 120 eval)</option>
+                        </select>
+                    </div>
+                    <div class="config-group">
+                        <label for="datasetSplit">Dataset Split:</label>
+                        <select id="datasetSplit" onchange="markConfigDirty()">
+                            <option value="training" selected>Training</option>
+                            <option value="evaluation">Evaluation</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="config-row">
+                    <div class="config-group">
                         <label for="maxGrids">Max Grids:</label>
                         <input type="number" id="maxGrids" min="0" max="100000" step="100" placeholder="None (all grids)" onchange="markConfigDirty()">
                         <span style="font-size: 12px; color: #6b7280;">(0 = all grids)</span>
@@ -853,6 +869,8 @@
                 document.getElementById('useInputOutputPairs').checked = data.use_input_output_pairs || false;
                 
                 // Data configuration
+                document.getElementById('datasetVersion').value = data.dataset_version || 'V2';
+                document.getElementById('datasetSplit').value = data.dataset_split || 'training';
                 document.getElementById('maxGrids').value = data.max_grids || 0;
                 if (data.filter_grid_size && data.filter_grid_size.length === 2) {
                     document.getElementById('filterGridHeight').value = data.filter_grid_size[0];
@@ -983,6 +1001,8 @@
             const useInputOutputPairs = document.getElementById('useInputOutputPairs').checked;
             
             // Data configuration
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
             const maxGrids = document.getElementById('maxGrids').value;
             const filterGridHeight = document.getElementById('filterGridHeight').value;
             const filterGridWidth = document.getElementById('filterGridWidth').value;
@@ -1024,6 +1044,8 @@
                     num_distractors: parseInt(numDistractors),
                     bottleneck_type: bottleneckType,
                     use_input_output_pairs: useInputOutputPairs,
+                    dataset_version: datasetVersion,
+                    dataset_split: datasetSplit,
                     max_grids: maxGrids ? parseInt(maxGrids) : null,
                     filter_grid_size: filterGridSize,
                     hidden_dim: parseInt(hiddenDim),

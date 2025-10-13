@@ -18,6 +18,16 @@ from model import ARCEncoder, ARCAutoencoder
 
 app = Flask(__name__)
 
+# Utility function for getting data path based on dataset version and split
+def get_data_path(dataset_version='V2', dataset_split='training'):
+    """Get the path to the dataset based on version and split."""
+    if dataset_version in ['V1', 'V2']:
+        # New directory-based format
+        return os.path.join(dataset_version, 'data', dataset_split)
+    else:
+        # Legacy single-file format
+        return config.DATA_PATH
+
 # Utility function for saving checkpoints with full config
 def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, training_state, val_loss=None, val_acc=None):
     """Save a complete checkpoint with model, optimizer, and all configuration."""
@@ -97,6 +107,8 @@ training_state = {
     'use_input_output_pairs': getattr(config, 'USE_INPUT_OUTPUT_PAIRS', False),
     'receiver_gets_input_puzzle': getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False),
     # Data configuration
+    'dataset_version': getattr(config, 'DATASET_VERSION', 'V2'),  # 'V1' or 'V2'
+    'dataset_split': getattr(config, 'DATASET_SPLIT', 'training'),  # 'training' or 'evaluation'
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
     # Model architecture
@@ -565,9 +577,15 @@ def pretrain_worker():
             num_distractors_for_dataset = 0
             track_puzzle_ids = False
         
+        # Get dataset path based on version and split
+        data_path = get_data_path(
+            dataset_version=training_state['dataset_version'],
+            dataset_split=training_state['dataset_split']
+        )
+        
         # Load ARC dataset
-        arc_dataset = ARCDataset(  # or 'dataset' in train_worker
-            config.DATA_PATH, 
+        arc_dataset = ARCDataset(
+            data_path, 
             min_size=config.MIN_GRID_SIZE,
             filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
             max_grids=training_state['max_grids'],           # ✅ Read from training_state
@@ -986,8 +1004,14 @@ def train_worker():
         track_puzzle_ids = task_type == 'puzzle_classification'
         use_input_output_pairs = training_state.get('use_input_output_pairs', False)
         
+        # Get dataset path based on version and split
+        data_path = get_data_path(
+            dataset_version=training_state['dataset_version'],
+            dataset_split=training_state['dataset_split']
+        )
+        
         dataset = ARCDataset(
-            config.DATA_PATH, 
+            data_path, 
             min_size=config.MIN_GRID_SIZE,
             filter_size=training_state['filter_grid_size'],
             max_grids=training_state['max_grids'],
@@ -1376,11 +1400,20 @@ def list_puzzles():
     try:
         from puzzle_dataset import load_all_puzzle_ids
         
-        puzzle_ids = load_all_puzzle_ids(config.DATA_PATH)
+        # Get dataset version and split from query parameters
+        dataset_version = request.args.get('dataset_version', 'V2')
+        dataset_split = request.args.get('dataset_split', 'evaluation')
+        
+        # Get data path
+        data_path = get_data_path(dataset_version, dataset_split)
+        
+        puzzle_ids = load_all_puzzle_ids(data_path)
         
         return jsonify({
             'puzzle_ids': puzzle_ids,
-            'count': len(puzzle_ids)
+            'count': len(puzzle_ids),
+            'dataset_version': dataset_version,
+            'dataset_split': dataset_split
         })
     
     except Exception as e:
@@ -1514,6 +1547,8 @@ def get_task_config():
         'use_input_output_pairs': training_state['use_input_output_pairs'],
         'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         # Data configuration
+        'dataset_version': training_state['dataset_version'],
+        'dataset_split': training_state['dataset_split'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         # Model architecture
@@ -1560,6 +1595,10 @@ def set_task_config():
         training_state['receiver_gets_input_puzzle'] = bool(data['receiver_gets_input_puzzle'])
     
     # Data configuration
+    if 'dataset_version' in data:
+        training_state['dataset_version'] = data['dataset_version']
+    if 'dataset_split' in data:
+        training_state['dataset_split'] = data['dataset_split']
     if 'max_grids' in data:
         training_state['max_grids'] = int(data['max_grids']) if data['max_grids'] else None
     if 'filter_grid_size' in data:
@@ -1612,6 +1651,8 @@ def set_task_config():
         'bottleneck_type': training_state['bottleneck_type'],
         'use_input_output_pairs': training_state['use_input_output_pairs'],
         'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
+        'dataset_version': training_state['dataset_version'],
+        'dataset_split': training_state['dataset_split'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         'hidden_dim': training_state['hidden_dim'],
@@ -1801,6 +1842,8 @@ def finetune_puzzle_route():
     epochs = data.get('epochs', 500)
     lr = data.get('lr', 1e-4)
     batch_size = data.get('batch_size', 8)
+    dataset_version = data.get('dataset_version', 'V2')
+    dataset_split = data.get('dataset_split', 'training')
     
     if not puzzle_id:
         return jsonify({'error': 'puzzle_id is required'}), 400
@@ -1809,11 +1852,14 @@ def finetune_puzzle_route():
         # Import here to avoid circular imports
         import subprocess
         
+        # Get data path
+        data_path = get_data_path(dataset_version, dataset_split)
+        
         # Build finetune command
         cmd_parts = [
             'python', 'finetune_puzzle.py',
             '--puzzle_id', puzzle_id,
-            '--data_path', config.DATA_PATH,
+            '--data_path', data_path,
             '--epochs', str(epochs),
             '--lr', str(lr),
             '--batch_size', str(batch_size),
@@ -1858,6 +1904,8 @@ def solve_puzzle_route():
     data = json.loads(request.data)
     puzzle_id = data.get('puzzle_id')
     checkpoint_path = data.get('checkpoint')
+    dataset_version = data.get('dataset_version', 'V2')
+    dataset_split = data.get('dataset_split', 'evaluation')
     
     if not puzzle_id:
         return jsonify({'error': 'puzzle_id is required'}), 400
@@ -1870,8 +1918,11 @@ def solve_puzzle_route():
         from puzzle_dataset import ARCSinglePuzzleDataset
         from model import ARCEncoder, ARCAutoencoder
         
+        # Get data path
+        data_path = get_data_path(dataset_version, dataset_split)
+        
         # Load test dataset
-        test_dataset = ARCSinglePuzzleDataset(config.DATA_PATH, puzzle_id, split='test')
+        test_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='test')
         
         # Load model
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -1911,7 +1962,46 @@ def solve_puzzle_route():
             use_stop_token=use_stop_token,
             stop_token_id=stop_token_id
         ).to(device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+        
+        # Load checkpoint with mapping for selection task checkpoints
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        
+        if 'receiver_reconstructor.symbol_embed.weight' in state_dict or \
+           'decoder_reconstructor.fc_decode.weight' in state_dict:
+            print('Detected selection task checkpoint - mapping background reconstruction weights...')
+            
+            # Map receiver_reconstructor -> receiver OR decoder_reconstructor -> decoder
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith('receiver_reconstructor.'):
+                    # Map background reconstruction receiver to main receiver
+                    new_key = k.replace('receiver_reconstructor.', 'receiver.')
+                    new_state_dict[new_key] = v
+                elif k.startswith('decoder_reconstructor.'):
+                    # Map background reconstruction decoder to main decoder
+                    new_key = k.replace('decoder_reconstructor.', 'decoder.')
+                    new_state_dict[new_key] = v
+                elif k.startswith('encoder.'):
+                    # Keep encoder weights
+                    new_state_dict[k] = v
+                elif k.startswith('sender.'):
+                    # Keep sender weights (for communication mode)
+                    new_state_dict[k] = v
+                # Skip receiver.* and decoder.* keys (those are for selection, not reconstruction)
+            
+            # Load the mapped weights
+            missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
+            
+            if missing_keys:
+                print(f'⚠️  Missing keys (will be randomly initialized): {missing_keys[:5]}...')
+            if unexpected_keys:
+                print(f'⚠️  Unexpected keys (ignored): {unexpected_keys[:5]}...')
+            
+            print('✓ Loaded and mapped weights from selection checkpoint')
+        else:
+            # Standard reconstruction checkpoint
+            model.load_state_dict(checkpoint['model_state_dict'])
+        
         model.eval()
         
         # Solve all test examples
@@ -1947,10 +2037,24 @@ def solve_puzzle_route():
                 predicted = pred[:output_h, :output_w]
             
             # Evaluate
-            exact_match = np.array_equal(predicted, output_actual)
-            correct_pixels = (predicted == output_actual).sum()
-            total_pixels = predicted.size
-            pixel_accuracy = 100.0 * correct_pixels / total_pixels
+            # Handle case where predicted and output_actual might have different shapes
+            if predicted.shape != output_actual.shape:
+                # If shapes don't match, they can't be equal
+                exact_match = False
+                # Calculate overlap area for pixel accuracy
+                min_h = min(predicted.shape[0], output_actual.shape[0])
+                min_w = min(predicted.shape[1], output_actual.shape[1])
+                if min_h > 0 and min_w > 0:
+                    correct_pixels = (predicted[:min_h, :min_w] == output_actual[:min_h, :min_w]).sum()
+                else:
+                    correct_pixels = 0
+                total_pixels = output_actual.size
+            else:
+                exact_match = np.array_equal(predicted, output_actual)
+                correct_pixels = (predicted == output_actual).sum()
+                total_pixels = predicted.size
+            
+            pixel_accuracy = 100.0 * correct_pixels / total_pixels if total_pixels > 0 else 0.0
             
             # Store results
             prediction_result = {
@@ -1968,7 +2072,12 @@ def solve_puzzle_route():
         
         # Calculate summary stats
         results['num_correct'] = sum(1 for p in results['predictions'] if p['exact_match'])
-        results['avg_pixel_accuracy'] = float(np.mean([p['pixel_accuracy'] for p in results['predictions']]))
+        pixel_accuracies = [p['pixel_accuracy'] for p in results['predictions']]
+        if len(pixel_accuracies) > 0:
+            avg_acc = float(np.mean(pixel_accuracies))
+            results['avg_pixel_accuracy'] = 0.0 if np.isnan(avg_acc) or np.isinf(avg_acc) else avg_acc
+        else:
+            results['avg_pixel_accuracy'] = 0.0
         
         return jsonify(results)
     

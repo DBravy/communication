@@ -352,6 +352,20 @@
         
         <div class="controls">
             <div class="control-section">
+                <label class="control-label">Dataset Configuration</label>
+                <div class="input-group">
+                    <select id="datasetVersion" onchange="refreshPuzzles()">
+                        <option value="V1">V1 (400 eval)</option>
+                        <option value="V2" selected>V2 (120 eval)</option>
+                    </select>
+                    <select id="datasetSplit" onchange="refreshPuzzles()">
+                        <option value="training">Training Set</option>
+                        <option value="evaluation" selected>Evaluation Set</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="control-section">
                 <label class="control-label">Puzzle ID</label>
                 <div class="input-group">
                     <select id="puzzleIdInput" style="flex: 2;">
@@ -455,7 +469,10 @@
             const select = document.getElementById('puzzleIdInput');
             select.innerHTML = '<option value="">Loading puzzles...</option>';
             
-            fetch('/list_puzzles')
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
+            
+            fetch(`/list_puzzles?dataset_version=${datasetVersion}&dataset_split=${datasetSplit}`)
                 .then(response => response.json())
                 .then(data => {
                     select.innerHTML = '<option value="">Select a puzzle...</option>';
@@ -468,7 +485,7 @@
                             select.appendChild(option);
                         });
                         
-                        showStatus(`Loaded ${data.count} puzzles`);
+                        showStatus(`Loaded ${data.count} puzzles from ${datasetVersion}/${datasetSplit}`);
                         setTimeout(hideStatus, 2000);
                     } else {
                         select.innerHTML = '<option value="">No puzzles found</option>';
@@ -533,12 +550,17 @@
             document.getElementById('finetuneBtn').disabled = true;
             document.getElementById('solveBtn').disabled = true;
             
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
+            
             fetch('/finetune_puzzle', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     puzzle_id: currentPuzzleId,
                     checkpoint: checkpoint || null,
+                    dataset_version: datasetVersion,
+                    dataset_split: datasetSplit,
                     epochs: 500,
                     lr: 1e-4,
                     batch_size: 8
@@ -584,12 +606,17 @@
             // Disable buttons during solving
             document.getElementById('solveBtn').disabled = true;
             
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
+            
             fetch('/solve_puzzle', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
                     puzzle_id: currentPuzzleId,
-                    checkpoint: checkpoint
+                    checkpoint: checkpoint,
+                    dataset_version: datasetVersion,
+                    dataset_split: datasetSplit
                 })
             })
             .then(response => response.json())

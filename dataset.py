@@ -4,6 +4,37 @@ import json
 import torch
 from torch.utils.data import Dataset
 import numpy as np
+import os
+import glob
+
+
+def load_arc_data(path):
+    """
+    Load ARC data from either a single JSON file or a directory of JSON files.
+    
+    Args:
+        path: Either a path to a JSON file or a directory containing JSON files
+    
+    Returns:
+        Dictionary mapping task_id to task data
+    """
+    if os.path.isfile(path):
+        # Single JSON file format (legacy)
+        with open(path, 'r') as f:
+            return json.load(f)
+    elif os.path.isdir(path):
+        # Directory format (V1/V2)
+        data = {}
+        json_files = glob.glob(os.path.join(path, '*.json'))
+        for json_file in json_files:
+            # Task ID is the filename without extension
+            task_id = os.path.splitext(os.path.basename(json_file))[0]
+            with open(json_file, 'r') as f:
+                data[task_id] = json.load(f)
+        return data
+    else:
+        raise ValueError(f"Path {path} is neither a file nor a directory")
+
 
 class ARCDataset(Dataset):
     def __init__(self, json_path, min_size=3, filter_size=None, max_grids=None, num_distractors=0, track_puzzle_ids=False, use_input_output_pairs=False):
@@ -29,9 +60,8 @@ class ARCDataset(Dataset):
         self.puzzle_id_map = {}  # Map from task_id to integer puzzle ID
         self.input_output_pairs = []  # List of (input_idx, output_idx) pairs
         
-        # Load all grids from JSON
-        with open(json_path, 'r') as f:
-            data = json.load(f)
+        # Load all grids from JSON (supports both file and directory formats)
+        data = load_arc_data(json_path)
         
         total_grids_before_filter = 0
         

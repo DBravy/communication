@@ -4,6 +4,8 @@ import json
 import torch
 from torch.utils.data import Dataset
 import numpy as np
+import os
+import glob
 
 
 class ARCSinglePuzzleDataset(Dataset):
@@ -12,7 +14,7 @@ class ARCSinglePuzzleDataset(Dataset):
     def __init__(self, json_path, puzzle_id, split='train'):
         """
         Args:
-            json_path: Path to ARC JSON file
+            json_path: Path to ARC JSON file or directory containing JSON files
             puzzle_id: ID of the puzzle to load
             split: 'train' or 'test'
         """
@@ -20,14 +22,23 @@ class ARCSinglePuzzleDataset(Dataset):
         self.split = split
         self.input_output_pairs = []
         
-        # Load puzzle data
-        with open(json_path, 'r') as f:
-            data = json.load(f)
-        
-        if puzzle_id not in data:
-            raise ValueError(f"Puzzle {puzzle_id} not found in {json_path}")
-        
-        puzzle_data = data[puzzle_id]
+        # Load puzzle data (support both file and directory formats)
+        if os.path.isfile(json_path):
+            # Single JSON file format (legacy)
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            if puzzle_id not in data:
+                raise ValueError(f"Puzzle {puzzle_id} not found in {json_path}")
+            puzzle_data = data[puzzle_id]
+        elif os.path.isdir(json_path):
+            # Directory format (V1/V2) - puzzle_id.json
+            puzzle_file = os.path.join(json_path, f"{puzzle_id}.json")
+            if not os.path.exists(puzzle_file):
+                raise ValueError(f"Puzzle file {puzzle_file} not found in {json_path}")
+            with open(puzzle_file, 'r') as f:
+                puzzle_data = json.load(f)
+        else:
+            raise ValueError(f"Path {json_path} is neither a file nor a directory")
         
         # Get examples from the specified split
         examples = puzzle_data.get(split, [])
@@ -93,7 +104,16 @@ def collate_fn_puzzle(batch):
 
 
 def load_all_puzzle_ids(json_path):
-    """Get list of all puzzle IDs in a JSON file."""
-    with open(json_path, 'r') as f:
-        data = json.load(f)
-    return list(data.keys())
+    """Get list of all puzzle IDs in a JSON file or directory."""
+    if os.path.isfile(json_path):
+        # Single JSON file format (legacy)
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        return sorted(list(data.keys()))
+    elif os.path.isdir(json_path):
+        # Directory format (V1/V2)
+        json_files = glob.glob(os.path.join(json_path, '*.json'))
+        puzzle_ids = [os.path.splitext(os.path.basename(f))[0] for f in json_files]
+        return sorted(puzzle_ids)
+    else:
+        raise ValueError(f"Path {json_path} is neither a file nor a directory")

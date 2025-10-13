@@ -41,7 +41,7 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
         optimizer.zero_grad()
         
         # Forward pass
-        logits_list, _, _ = model(input_grids, input_sizes, temperature=1.0)
+        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
         
         # Compute loss for each sample
         batch_loss = 0
@@ -93,7 +93,7 @@ def validate(model, dataloader, criterion, device):
             output_grids = output_grids.to(device)
             
             # Forward pass
-            logits_list, _, _ = model(input_grids, input_sizes, temperature=1.0)
+            logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
             
             # Compute loss for each sample
             batch_loss = 0
@@ -185,7 +185,9 @@ def main():
         bottleneck_type=config.BOTTLENECK_TYPE,
         task_type='reconstruction',  # Always use reconstruction for puzzle solving
         num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-        receiver_gets_input_puzzle=receiver_gets_input_puzzle
+        receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+        use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
+        stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
     ).to(device)
     
     # Load checkpoint if provided
