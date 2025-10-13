@@ -33,6 +33,7 @@
             color: white;
             padding: 30px;
             text-align: center;
+            position: relative;
         }
         
         .header h1 {
@@ -43,6 +44,25 @@
         .header p {
             opacity: 0.9;
             font-size: 1.1em;
+        }
+        
+        .nav-link {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-50%) scale(1.05);
         }
         
         .task-config {
@@ -519,6 +539,7 @@
 <body>
     <div class="container">
         <div class="header">
+            <a href="/puzzle_solver" class="nav-link">Puzzle Solver →</a>
             <h1>ARC Training Monitor</h1>
             <p>Communication Model Training Dashboard</p>
         </div>
@@ -624,6 +645,24 @@
                     <div class="config-group">
                         <label for="temperature">Temperature:</label>
                         <input type="number" id="temperature" min="0.1" max="5" step="0.1" value="1.0" onchange="markConfigDirty()">
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="receiverGetsInputPuzzle" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="receiverGetsInputPuzzle" onchange="markConfigDirty()">
+                            <span>🧩 Receiver Gets Input Puzzle</span>
+                        </label>
+                        <span style="font-size: 11px; color: #6b7280;">(Receiver sees both message symbols AND input grid for reconstruction)</span>
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="useStopToken" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="useStopToken" onchange="markConfigDirty()">
+                            <span>⏹️ Use Stop Token</span>
+                        </label>
+                        <span style="font-size: 11px; color: #6b7280;">(Allow agents to emit stop token for variable-length messages)</span>
                     </div>
                 </div>
             </div>
@@ -832,6 +871,8 @@
                 document.getElementById('vocabSize').value = data.vocab_size || 100;
                 document.getElementById('maxMessageLength').value = data.max_message_length || 3;
                 document.getElementById('temperature').value = data.temperature || 1.0;
+                document.getElementById('receiverGetsInputPuzzle').checked = data.receiver_gets_input_puzzle || false;
+                document.getElementById('useStopToken').checked = data.use_stop_token || false;
                 
                 // Training hyperparameters
                 document.getElementById('batchSize').value = data.batch_size || 32;
@@ -959,6 +1000,8 @@
             const vocabSize = document.getElementById('vocabSize').value;
             const maxMessageLength = document.getElementById('maxMessageLength').value;
             const temperature = document.getElementById('temperature').value;
+            const receiverGetsInputPuzzle = document.getElementById('receiverGetsInputPuzzle').checked;
+            const useStopToken = document.getElementById('useStopToken').checked;
             
             // Training hyperparameters
             const batchSize = document.getElementById('batchSize').value;
@@ -989,6 +1032,8 @@
                     vocab_size: parseInt(vocabSize),
                     max_message_length: parseInt(maxMessageLength),
                     temperature: parseFloat(temperature),
+                    receiver_gets_input_puzzle: receiverGetsInputPuzzle,
+                    use_stop_token: useStopToken,
                     batch_size: parseInt(batchSize),
                     learning_rate: parseFloat(learningRate),
                     pretrain_learning_rate: parseFloat(pretrainLearningRate),

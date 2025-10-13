@@ -23,9 +23,12 @@ NUM_DISTRACTORS = 1  # Number of distractor grids for selection task (actual num
 USE_INPUT_OUTPUT_PAIRS = True  # If True, train on input→output transformations (requires reconstruction or selection task)
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
-VOCAB_SIZE = 25  # Size of discrete symbol vocabulary
+VOCAB_SIZE = 25  # Size of discrete symbol vocabulary (actual vocab, stop token is separate)
 MAX_MESSAGE_LENGTH = 2  # Maximum length of message sequences
 TEMPERATURE = 1.0  # Gumbel-softmax temperature
+RECEIVER_GETS_INPUT_PUZZLE = True  # If True, receiver also gets the input puzzle in addition to symbols (helps with reconstruction)
+USE_STOP_TOKEN = True  # If True, agents can emit a stop token to terminate messages early (variable length)
+STOP_TOKEN_ID = VOCAB_SIZE  # ID for the stop token (should be VOCAB_SIZE, as it's appended to the vocabulary)
 
 # Loss weights
 SIZE_LOSS_WEIGHT = 0.01  # Weight for size prediction loss

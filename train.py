@@ -122,16 +122,31 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
                     
                     # Forward pass for single sample
                     single_candidates_sizes = candidates_sizes_list[i]
-                    selection_logits_list, _, messages = model(
+                    model_output = model(
                         single_grid, [(actual_h, actual_w)], temperature=1.0,
                         candidates_list=[candidates], candidates_sizes_list=[single_candidates_sizes],
                         target_indices=target_idx.unsqueeze(0)
                     )
                     
+                    # Unpack output based on bottleneck type
+                    if len(model_output) == 5:  # communication mode with message_lengths
+                        selection_logits_list, reconstruction_logits_list, _, messages, message_lengths = model_output
+                    else:  # autoencoder mode
+                        selection_logits_list, reconstruction_logits_list, _, messages = model_output
+                        message_lengths = None
+                    
                     # Show message if in communication mode
                     if messages is not None:
                         msg = messages[0].cpu().tolist()
-                        print(f"\n📨 MESSAGE: {msg}")
+                        if message_lengths is not None:
+                            actual_length = message_lengths[0].item()
+                            # Show only the actual message (up to stop token)
+                            actual_msg = msg[:actual_length]
+                            print(f"\n📨 MESSAGE (length {actual_length}/{len(msg)}): {actual_msg}")
+                            if actual_length < len(msg):
+                                print(f"   (Stopped early - max length is {len(msg)})")
+                        else:
+                            print(f"\n📨 MESSAGE: {msg}")
                     else:
                         print(f"\n🔄 BOTTLENECK: Continuous latent vector (dim={model.encoder.latent_dim})")
                     
@@ -160,10 +175,38 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
                     print(f"\n📊 METRICS:")
                     print(f"   Selection: {'✓ CORRECT' if correct else '✗ INCORRECT'}")
                     print(f"   Confidence: {probs[pred_idx]:.2%}")
+                    
+                    # Show reconstruction if selection was correct
+                    if correct:
+                        recon_logits = reconstruction_logits_list[0]
+                        recon = recon_logits.argmax(dim=1).squeeze(0).cpu().numpy()
+                        visualize_grid(recon, f"RECONSTRUCTION (from message) - Size: {recon.shape[0]}x{recon.shape[1]}")
+                        
+                        # Calculate reconstruction accuracy
+                        if use_input_output_pairs:
+                            # Compare against selected candidate (output)
+                            target_grid = candidates[target_idx.item()][:recon.shape[0], :recon.shape[1]].cpu().numpy()
+                        else:
+                            # Compare against input
+                            target_grid = input_grid[:recon.shape[0], :recon.shape[1]]
+                        
+                        min_h = min(target_grid.shape[0], recon.shape[0])
+                        min_w = min(target_grid.shape[1], recon.shape[1])
+                        correct_pixels = (target_grid[:min_h, :min_w] == recon[:min_h, :min_w]).sum()
+                        total_pixels = min_h * min_w
+                        recon_accuracy = 100.0 * correct_pixels / total_pixels
+                        print(f"   Reconstruction accuracy: {recon_accuracy:.2f}% ({correct_pixels}/{total_pixels} correct)")
                 else:
                     # Reconstruction task
                     single_grid = grid.unsqueeze(0)
-                    logits_list, _, messages = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+                    model_output = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+                    
+                    # Unpack output based on bottleneck type
+                    if len(model_output) == 4:  # communication mode with message_lengths
+                        logits_list, _, messages, message_lengths = model_output
+                    else:  # autoencoder mode
+                        logits_list, _, messages = model_output
+                        message_lengths = None
                     
                     # Get reconstruction
                     recon = logits_list[0].argmax(dim=1).squeeze(0).cpu().numpy()
@@ -171,7 +214,15 @@ def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type
                     # Show message if in communication mode
                     if messages is not None:
                         msg = messages[0].cpu().tolist()
-                        print(f"\n📨 MESSAGE: {msg}")
+                        if message_lengths is not None:
+                            actual_length = message_lengths[0].item()
+                            # Show only the actual message (up to stop token)
+                            actual_msg = msg[:actual_length]
+                            print(f"\n📨 MESSAGE (length {actual_length}/{len(msg)}): {actual_msg}")
+                            if actual_length < len(msg):
+                                print(f"   (Stopped early - max length is {len(msg)})")
+                        else:
+                            print(f"\n📨 MESSAGE: {msg}")
                     else:
                         print(f"\n🔄 BOTTLENECK: Continuous latent vector (dim={model.encoder.latent_dim})")
                     
@@ -256,7 +307,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
         
         if task_type == 'puzzle_classification':
             # Puzzle classification task (no I/O pairs)
-            classification_logits, _, messages = model(input_grids, input_sizes, temperature=temperature, labels=labels)
+            model_output = model(input_grids, input_sizes, temperature=temperature, labels=labels)
+            if len(model_output) == 4:  # communication mode with message_lengths
+                classification_logits, _, messages, message_lengths = model_output
+            else:
+                classification_logits, _, messages = model_output
             
             # Compute classification loss
             loss = criterion(classification_logits, labels)
@@ -266,26 +321,36 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
             batch_correct = (pred == labels).sum().item()
             batch_total = labels.size(0)
         elif task_type == 'selection':
-            # Selection task
+            # Selection task (now also computes reconstruction in background)
             if use_input_output_pairs:
                 # Use input to generate message, select from candidates based on output
-                selection_logits_list, actual_sizes, messages = model(
+                model_output = model(
                     input_grids, input_sizes, temperature=temperature, 
                     candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
                     target_indices=target_indices
                 )
             else:
                 # Original: select the same grid
-                selection_logits_list, actual_sizes, messages = model(
+                model_output = model(
                     input_grids, input_sizes, temperature=temperature, 
                     candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
                     target_indices=target_indices
                 )
             
+            # Unpack output based on bottleneck type
+            if len(model_output) == 5:  # communication mode with message_lengths
+                selection_logits_list, reconstruction_logits_list, actual_sizes, messages, message_lengths = model_output
+            else:  # autoencoder mode
+                selection_logits_list, reconstruction_logits_list, actual_sizes, messages = model_output
+            
             # Compute selection loss for each sample
             batch_loss = 0
             batch_correct = 0
             batch_total = 0
+            reconstruction_loss_total = 0
+            reconstruction_correct = 0
+            reconstruction_total = 0
+            num_reconstructions = 0
             
             for sample_idx, sel_logits in enumerate(selection_logits_list):
                 target_idx = target_indices[sample_idx]
@@ -293,15 +358,56 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                 batch_loss += sample_loss
                 
                 pred_idx = sel_logits.argmax()
-                batch_correct += (pred_idx == target_idx).item()
+                is_correct = (pred_idx == target_idx).item()
+                batch_correct += is_correct
                 batch_total += 1
+                
+                # Compute reconstruction loss when selection is correct
+                if is_correct:
+                    recon_logits = reconstruction_logits_list[sample_idx]
+                    actual_h, actual_w = actual_sizes[sample_idx]
+                    H, W = recon_logits.shape[2], recon_logits.shape[3]
+                    
+                    # Get the target grid for reconstruction
+                    if use_input_output_pairs:
+                        # Reconstruct the selected output grid
+                        target_grid_idx = target_indices[sample_idx]
+                        target_grid = candidates_list[sample_idx][target_grid_idx:target_grid_idx+1, :H, :W]
+                    else:
+                        # Reconstruct the input grid (self-supervised)
+                        target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                    
+                    # Compute reconstruction loss
+                    logits_flat = recon_logits.permute(0, 2, 3, 1).reshape(-1, recon_logits.shape[1])
+                    targets_flat = target_grid.reshape(-1)
+                    
+                    recon_loss = criterion(logits_flat, targets_flat)
+                    reconstruction_loss_total += recon_loss
+                    num_reconstructions += 1
+                    
+                    # Calculate reconstruction accuracy
+                    pred = recon_logits.argmax(dim=1).squeeze(0)
+                    target = target_grid.squeeze(0)
+                    reconstruction_correct += (pred == target).sum().item()
+                    reconstruction_total += target.numel()
             
+            # Combine losses: selection loss for all samples + reconstruction loss for correct selections
             loss = batch_loss / len(selection_logits_list)
+            if num_reconstructions > 0:
+                reconstruction_loss_avg = reconstruction_loss_total / num_reconstructions
+                # Add reconstruction loss (already detached from sender/encoder via .detach())
+                loss = loss + reconstruction_loss_avg
         else:
             # Reconstruction task
             if use_input_output_pairs:
                 # Use input to generate message, reconstruct output
-                logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=temperature)
+                model_output = model(input_grids, input_sizes, temperature=temperature)
+                
+                # Unpack output based on bottleneck type
+                if len(model_output) == 4:  # communication mode with message_lengths
+                    logits_list, actual_sizes, messages, message_lengths = model_output
+                else:  # autoencoder mode
+                    logits_list, actual_sizes, messages = model_output
                 
                 # Compute reconstruction loss for each sample (target is OUTPUT)
                 batch_loss = 0
@@ -328,7 +434,13 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                 loss = batch_loss / len(logits_list)
             else:
                 # Original: reconstruct the same grid
-                logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=temperature)
+                model_output = model(input_grids, input_sizes, temperature=temperature)
+                
+                # Unpack output based on bottleneck type
+                if len(model_output) == 4:  # communication mode with message_lengths
+                    logits_list, actual_sizes, messages, message_lengths = model_output
+                else:  # autoencoder mode
+                    logits_list, actual_sizes, messages = model_output
                 
                 # Compute reconstruction loss for each sample
                 batch_loss = 0
@@ -432,7 +544,11 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
             # Forward pass
             if task_type == 'puzzle_classification':
                 # Puzzle classification task
-                classification_logits, _, messages = model(input_grids, input_sizes, temperature=1.0, labels=labels)
+                model_output = model(input_grids, input_sizes, temperature=1.0, labels=labels)
+                if len(model_output) == 4:  # communication mode with message_lengths
+                    classification_logits, _, messages, message_lengths = model_output
+                else:
+                    classification_logits, _, messages = model_output
                 
                 # Compute classification loss
                 loss = criterion(classification_logits, labels)
@@ -447,22 +563,30 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                 total += batch_total
             elif task_type == 'selection':
                 if use_input_output_pairs:
-                    selection_logits_list, actual_sizes, messages = model(
+                    model_output = model(
                         input_grids, input_sizes, temperature=1.0,
                         candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
                         target_indices=target_indices
                     )
                 else:
-                    selection_logits_list, actual_sizes, messages = model(
+                    model_output = model(
                         input_grids, input_sizes, temperature=1.0,
                         candidates_list=candidates_list, candidates_sizes_list=candidates_sizes_list,
                         target_indices=target_indices
                     )
                 
+                # Unpack output based on bottleneck type
+                if len(model_output) == 5:  # communication mode with message_lengths
+                    selection_logits_list, reconstruction_logits_list, actual_sizes, messages, message_lengths = model_output
+                else:  # autoencoder mode
+                    selection_logits_list, reconstruction_logits_list, actual_sizes, messages = model_output
+                
                 # Compute selection loss for each sample
                 batch_loss = 0
                 batch_correct = 0
                 batch_total = 0
+                reconstruction_loss_total = 0
+                num_reconstructions = 0
                 
                 for sample_idx, sel_logits in enumerate(selection_logits_list):
                     target_idx = target_indices[sample_idx]
@@ -470,14 +594,47 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                     batch_loss += sample_loss
                     
                     pred_idx = sel_logits.argmax()
-                    batch_correct += (pred_idx == target_idx).item()
+                    is_correct = (pred_idx == target_idx).item()
+                    batch_correct += is_correct
                     batch_total += 1
+                    
+                    # Compute reconstruction loss when selection is correct (for validation tracking)
+                    if is_correct:
+                        recon_logits = reconstruction_logits_list[sample_idx]
+                        actual_h, actual_w = actual_sizes[sample_idx]
+                        H, W = recon_logits.shape[2], recon_logits.shape[3]
+                        
+                        # Get the target grid for reconstruction
+                        if use_input_output_pairs:
+                            # Reconstruct the selected output grid
+                            target_grid_idx = target_indices[sample_idx]
+                            target_grid = candidates_list[sample_idx][target_grid_idx:target_grid_idx+1, :H, :W]
+                        else:
+                            # Reconstruct the input grid (self-supervised)
+                            target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                        
+                        # Compute reconstruction loss
+                        logits_flat = recon_logits.permute(0, 2, 3, 1).reshape(-1, recon_logits.shape[1])
+                        targets_flat = target_grid.reshape(-1)
+                        
+                        recon_loss = criterion(logits_flat, targets_flat)
+                        reconstruction_loss_total += recon_loss
+                        num_reconstructions += 1
                 
                 loss = batch_loss / len(selection_logits_list)
+                if num_reconstructions > 0:
+                    reconstruction_loss_avg = reconstruction_loss_total / num_reconstructions
+                    loss = loss + reconstruction_loss_avg
             else:
                 if use_input_output_pairs:
                     # Use input to generate message, reconstruct output
-                    logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=1.0)
+                    model_output = model(input_grids, input_sizes, temperature=1.0)
+                    
+                    # Unpack output based on bottleneck type
+                    if len(model_output) == 4:  # communication mode with message_lengths
+                        logits_list, actual_sizes, messages, message_lengths = model_output
+                    else:  # autoencoder mode
+                        logits_list, actual_sizes, messages = model_output
                     
                     # Compute reconstruction loss for each sample (target is OUTPUT)
                     batch_loss = 0
@@ -504,7 +661,13 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                     loss = batch_loss / len(logits_list)
                 else:
                     # Original: reconstruct the same grid
-                    logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=1.0)
+                    model_output = model(input_grids, input_sizes, temperature=1.0)
+                    
+                    # Unpack output based on bottleneck type
+                    if len(model_output) == 4:  # communication mode with message_lengths
+                        logits_list, actual_sizes, messages, message_lengths = model_output
+                    else:  # autoencoder mode
+                        logits_list, actual_sizes, messages = model_output
                     
                     # Compute reconstruction loss for each sample
                     batch_loss = 0
@@ -545,6 +708,7 @@ def analyze_messages(model, dataloader, device, num_samples=5):
         
     model.eval()
     print("\n--- Sample Messages ---")
+    use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
     
     with torch.no_grad():
         for grids, sizes in dataloader:
@@ -552,13 +716,25 @@ def analyze_messages(model, dataloader, device, num_samples=5):
             num_samples = min(num_samples, len(grids))
             
             # Get messages from sender
-            message, _ = model.sender(grids[:num_samples], sizes=sizes[:num_samples], temperature=1.0)
+            sender_output = model.sender(grids[:num_samples], sizes=sizes[:num_samples], temperature=1.0)
+            if len(sender_output) == 3:  # with message_lengths
+                message, _, message_lengths = sender_output
+            else:  # old format
+                message, _ = sender_output
+                message_lengths = None
             
             for i in range(num_samples):
                 msg = message[i].cpu().tolist()
                 actual_size = sizes[i]
                 print(f"Grid {i} - Size: {actual_size}")
-                print(f"  Message: {msg}")
+                if message_lengths is not None and use_stop_token:
+                    actual_length = message_lengths[i].item()
+                    actual_msg = msg[:actual_length]
+                    print(f"  Message (length {actual_length}/{len(msg)}): {actual_msg}")
+                    if actual_length < len(msg):
+                        print(f"  (Stopped early - max length is {len(msg)})")
+                else:
+                    print(f"  Message: {msg}")
             
             break  # Only show first batch
     print("---")
@@ -668,8 +844,16 @@ def main():
     print(f'\n{"="*80}')
     print(f'BOTTLENECK TYPE: {config.BOTTLENECK_TYPE.upper()}')
     if config.BOTTLENECK_TYPE == 'communication':
+        use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
         print(f'  - Vocabulary size: {config.VOCAB_SIZE}')
+        if use_stop_token:
+            stop_token_id = getattr(config, 'STOP_TOKEN_ID', config.VOCAB_SIZE)
+            print(f'  - Stop token enabled: True (ID: {stop_token_id}, effective vocab size: {config.VOCAB_SIZE + 1})')
+        else:
+            print(f'  - Stop token enabled: False')
         print(f'  - Max message length: {config.MAX_MESSAGE_LENGTH}')
+        receiver_gets_input = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+        print(f'  - Receiver gets input puzzle: {receiver_gets_input}')
     else:
         print(f'  - Latent dimension: {config.LATENT_DIM}')
     
@@ -772,6 +956,9 @@ def main():
         load_pretrained_encoder(encoder, pretrained_path)
     
     # Create full model with specified bottleneck type and task type
+    receiver_gets_input_puzzle = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+    use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
+    stop_token_id = getattr(config, 'STOP_TOKEN_ID', None)
     model = ARCAutoencoder(
         encoder=encoder,
         vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
@@ -783,7 +970,10 @@ def main():
         bottleneck_type=config.BOTTLENECK_TYPE,
         task_type=task_type,
         num_conv_layers=num_conv_layers,  # Use the same num_conv_layers as encoder
-        num_classes=num_classes  # For puzzle_classification task
+        num_classes=num_classes,  # For puzzle_classification task
+        receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+        use_stop_token=use_stop_token,
+        stop_token_id=stop_token_id
     ).to(device)
     
     # Freeze encoder if configured

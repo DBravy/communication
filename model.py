@@ -160,21 +160,28 @@ class ARCDecoder(nn.Module):
 class SenderAgent(nn.Module):
     """
     FIXED: Sender that returns both discrete and soft representations.
+    Supports variable-length messages via stop tokens.
     """
-    def __init__(self, encoder, vocab_size, max_length):
+    def __init__(self, encoder, vocab_size, max_length, use_stop_token=False, stop_token_id=None):
         super().__init__()
         self.encoder = encoder
-        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.max_length = max_length
+        self.use_stop_token = use_stop_token
         
-        self.lstm = nn.LSTM(vocab_size, encoder.latent_dim, batch_first=True)
-        self.vocab_proj = nn.Linear(encoder.latent_dim, vocab_size)
+        # If using stop tokens, effective vocab is vocab_size + 1
+        self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
+        self.stop_token_id = stop_token_id if use_stop_token else None
+        
+        self.lstm = nn.LSTM(self.effective_vocab_size, encoder.latent_dim, batch_first=True)
+        self.vocab_proj = nn.Linear(encoder.latent_dim, self.effective_vocab_size)
         
     def forward(self, grids, sizes=None, temperature=1.0):
         """
         Returns:
             message: [batch, max_length] - discrete symbols (for logging)
-            soft_message: [batch, max_length, vocab_size] - soft for gradients
+            soft_message: [batch, max_length, effective_vocab_size] - soft for gradients
+            message_lengths: [batch] - actual lengths of messages (position of stop token + 1, or max_length)
         """
         B = grids.shape[0]
         
@@ -185,8 +192,10 @@ class SenderAgent(nn.Module):
         
         hard_messages = []
         soft_messages = []
+        message_lengths = torch.full((B,), self.max_length, dtype=torch.long, device=grids.device)
+        stopped = torch.zeros(B, dtype=torch.bool, device=grids.device)  # Track which sequences have stopped
         
-        input_token = torch.zeros(B, self.vocab_size, device=grids.device)
+        input_token = torch.zeros(B, self.effective_vocab_size, device=grids.device)
         
         for t in range(self.max_length):
             input_token_unsqueezed = input_token.unsqueeze(1)
@@ -194,6 +203,11 @@ class SenderAgent(nn.Module):
             lstm_out = lstm_out.squeeze(1)
             
             logits = self.vocab_proj(lstm_out)
+            
+            # MODIFIED: Prevent stop token at first position
+            if self.use_stop_token and t == 0:
+                # Mask out stop token by setting its logit to negative infinity
+                logits[:, self.stop_token_id] = -float('inf')
             
             if self.training:
                 # Gumbel-softmax
@@ -204,46 +218,83 @@ class SenderAgent(nn.Module):
                 
                 # Straight-through
                 hard_token = F.one_hot(soft_token.argmax(dim=-1), 
-                                      num_classes=self.vocab_size).float()
+                                    num_classes=self.effective_vocab_size).float()
                 
                 # FIXED: Proper straight-through
                 token_for_next_input = hard_token.detach() - soft_token.detach() + soft_token
                 
                 soft_messages.append(soft_token)
-                hard_messages.append(soft_token.argmax(dim=-1))
+                hard_symbol = soft_token.argmax(dim=-1)
+                hard_messages.append(hard_symbol)
+                
+                # Check for stop tokens (only if enabled and not already stopped)
+                if self.use_stop_token:
+                    is_stop = (hard_symbol == self.stop_token_id) & ~stopped
+                    # Record the length for sequences that just stopped (t+1 because we include the stop token)
+                    message_lengths[is_stop] = t + 1
+                    stopped = stopped | is_stop
             else:
                 # Eval mode
                 soft_token = F.softmax(logits, dim=-1)
-                hard_token = F.one_hot(logits.argmax(dim=-1), 
-                                 num_classes=self.vocab_size).float()
+                hard_symbol = logits.argmax(dim=-1)
+                hard_token = F.one_hot(hard_symbol, num_classes=self.effective_vocab_size).float()
                 token_for_next_input = hard_token
                 
                 soft_messages.append(soft_token)
-                hard_messages.append(logits.argmax(dim=-1))
+                hard_messages.append(hard_symbol)
+                
+                # Check for stop tokens (only if enabled and not already stopped)
+                if self.use_stop_token:
+                    is_stop = (hard_symbol == self.stop_token_id) & ~stopped
+                    message_lengths[is_stop] = t + 1
+                    stopped = stopped | is_stop
             
             input_token = token_for_next_input
         
         message = torch.stack(hard_messages, dim=1)
         soft_message = torch.stack(soft_messages, dim=1)
         
-        return message, soft_message
+        return message, soft_message, message_lengths
 
 
 class ReceiverAgent(nn.Module):
     """
     FIXED: Receiver that can accept soft message representations.
+    Can optionally also receive the input puzzle to aid reconstruction.
+    Supports variable-length messages via masking.
     """
-    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30):
+    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30, receives_input_puzzle=False, use_stop_token=False, stop_token_id=None):
         super().__init__()
-        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_colors = num_colors
         self.hidden_dim = hidden_dim
         self.max_grid_size = max_grid_size
+        self.receives_input_puzzle = receives_input_puzzle
+        self.use_stop_token = use_stop_token
+        self.stop_token_id = stop_token_id if use_stop_token else None
         
-        self.symbol_embed = nn.Embedding(vocab_size, hidden_dim)
-        self.continuous_proj = nn.Linear(vocab_size, hidden_dim)
+        # If using stop tokens, effective vocab is vocab_size + 1
+        self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
+        
+        self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
+        self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        
+        # If receiver gets input puzzle, add an encoder for it
+        if receives_input_puzzle:
+            # Simple 2-layer CNN to encode input puzzle
+            self.input_puzzle_conv1 = nn.Conv2d(num_colors, hidden_dim // 2, kernel_size=3, padding=1)
+            self.input_puzzle_bn1 = nn.BatchNorm2d(hidden_dim // 2)
+            self.input_puzzle_conv2 = nn.Conv2d(hidden_dim // 2, hidden_dim, kernel_size=3, padding=1)
+            self.input_puzzle_bn2 = nn.BatchNorm2d(hidden_dim)
+            self.input_puzzle_pool = nn.AdaptiveAvgPool2d((4, 4))
+            self.input_puzzle_fc = nn.Linear(hidden_dim * 4 * 4, hidden_dim)
+            
+            # Combine message and input puzzle representations
+            self.combine_fc = nn.Linear(hidden_dim * 2, hidden_dim)
+        
+        self.relu = nn.ReLU()
         
         self.fc_decode = nn.Linear(hidden_dim, hidden_dim * 4 * 4)
         
@@ -267,17 +318,65 @@ class ReceiverAgent(nn.Module):
         
         self.relu = nn.ReLU()
     
-    def forward(self, message, target_size, soft_message=None):
+    def forward(self, message, target_size, soft_message=None, input_puzzle=None, input_size=None, message_lengths=None):
         """
         FIXED: Accepts soft_message for gradient flow during training.
+        Can also accept input_puzzle to aid reconstruction.
+        Supports variable-length messages via masking.
+        
+        Args:
+            message: Discrete message symbols [batch, max_length]
+            target_size: (height, width) of target grid to reconstruct
+            soft_message: Soft message representation [batch, max_length, effective_vocab_size]
+            input_puzzle: Optional input puzzle [batch, H, W] (requires receives_input_puzzle=True)
+            input_size: Optional (height, width) of input puzzle
+            message_lengths: Optional [batch] tensor of actual message lengths (for masking)
         """
         if soft_message is not None and self.training:
             embedded = self.continuous_proj(soft_message)
         else:
             embedded = self.symbol_embed(message)
         
+        # If we have message lengths, mask out padding (symbols after stop token)
+        if message_lengths is not None and self.use_stop_token:
+            # Create mask: True for valid positions, False for padding
+            batch_size, seq_len = message.shape
+            # Create position indices [batch, seq_len]
+            positions = torch.arange(seq_len, device=message.device).unsqueeze(0).expand(batch_size, -1)
+            # Mask is True where position < message_length
+            mask = positions < message_lengths.unsqueeze(1)
+            # Zero out embeddings after stop token
+            embedded = embedded * mask.unsqueeze(-1).float()
+        
         lstm_out, (h, c) = self.lstm(embedded)
         message_repr = h.squeeze(0)
+        
+        # If receiver gets input puzzle, encode it and combine with message
+        if self.receives_input_puzzle and input_puzzle is not None:
+            # One-hot encode input puzzle
+            input_one_hot = F.one_hot(input_puzzle.long(), num_classes=self.num_colors).float()
+            input_one_hot = input_one_hot.permute(0, 3, 1, 2)  # [batch, num_colors, H, W]
+            
+            # Encode input puzzle through CNN
+            x = self.relu(self.input_puzzle_bn1(self.input_puzzle_conv1(input_one_hot)))
+            x = self.relu(self.input_puzzle_bn2(self.input_puzzle_conv2(x)))
+            
+            # Pool to fixed size
+            if input_size is not None:
+                # Only pool the actual content area
+                h_in, w_in = input_size
+                content = x[:, :, :h_in, :w_in]
+                x = self.input_puzzle_pool(content)
+            else:
+                x = self.input_puzzle_pool(x)
+            
+            # Flatten and project
+            x = x.reshape(x.shape[0], -1)
+            input_puzzle_repr = self.relu(self.input_puzzle_fc(x))
+            
+            # Combine message and input puzzle representations
+            combined = torch.cat([message_repr, input_puzzle_repr], dim=1)
+            message_repr = self.relu(self.combine_fc(combined))
         
         H, W = target_size
         
@@ -300,15 +399,20 @@ class ReceiverAgent(nn.Module):
 
 
 class ReceiverPuzzleClassifier(nn.Module):
-    """Receiver for puzzle classification task."""
-    def __init__(self, vocab_size, num_classes, hidden_dim):
+    """Receiver for puzzle classification task. Supports variable-length messages."""
+    def __init__(self, vocab_size, num_classes, hidden_dim, use_stop_token=False, stop_token_id=None):
         super().__init__()
-        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_classes = num_classes
         self.hidden_dim = hidden_dim
+        self.use_stop_token = use_stop_token
+        self.stop_token_id = stop_token_id if use_stop_token else None
         
-        self.symbol_embed = nn.Embedding(vocab_size, hidden_dim)
-        self.continuous_proj = nn.Linear(vocab_size, hidden_dim)
+        # If using stop tokens, effective vocab is vocab_size + 1
+        self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
+        
+        self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
+        self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
         
@@ -322,12 +426,23 @@ class ReceiverPuzzleClassifier(nn.Module):
             nn.Linear(128, num_classes)
         )
     
-    def forward(self, message, soft_message=None):
-        """FIXED: Accepts soft_message."""
+    def forward(self, message, soft_message=None, message_lengths=None):
+        """FIXED: Accepts soft_message and message_lengths for variable-length messages."""
         if soft_message is not None and self.training:
             msg_emb = self.continuous_proj(soft_message)
         else:
             msg_emb = self.symbol_embed(message)
+        
+        # If we have message lengths, mask out padding (symbols after stop token)
+        if message_lengths is not None and self.use_stop_token:
+            # Create mask: True for valid positions, False for padding
+            batch_size, seq_len = message.shape
+            # Create position indices [batch, seq_len]
+            positions = torch.arange(seq_len, device=message.device).unsqueeze(0).expand(batch_size, -1)
+            # Mask is True where position < message_length
+            mask = positions < message_lengths.unsqueeze(1)
+            # Zero out embeddings after stop token
+            msg_emb = msg_emb * mask.unsqueeze(-1).float()
         
         _, (h, _) = self.lstm(msg_emb)
         msg_repr = h.squeeze(0)
@@ -342,20 +457,26 @@ class ReceiverSelector(nn.Module):
     
     Key change: Uses dot-product similarity instead of concatenation + linear layer.
     This prevents CrossEntropyLoss gradients from canceling out.
+    Supports variable-length messages via masking.
     """
-    def __init__(self, vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers=2):
+    def __init__(self, vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers=2, use_stop_token=False, stop_token_id=None):
         super().__init__()
-        self.vocab_size = vocab_size
+        self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_colors = num_colors
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.num_conv_layers = num_conv_layers
+        self.use_stop_token = use_stop_token
+        self.stop_token_id = stop_token_id if use_stop_token else None
         
         assert embedding_dim == num_colors
         assert num_conv_layers >= 1
         
-        self.symbol_embed = nn.Embedding(vocab_size, hidden_dim)
-        self.continuous_proj = nn.Linear(vocab_size, hidden_dim)
+        # If using stop tokens, effective vocab is vocab_size + 1
+        self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
+        
+        self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
+        self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
         
@@ -407,17 +528,29 @@ class ReceiverSelector(nn.Module):
         
         return x
     
-    def forward(self, message, candidates, candidate_sizes=None, soft_message=None):
+    def forward(self, message, candidates, candidate_sizes=None, soft_message=None, message_lengths=None):
         """
         FIXED: Computes similarity scores instead of concatenating features.
         
         This prevents gradient cancellation because the message representation
         is not directly shared across all candidates via expand().
+        Supports variable-length messages via masking.
         """
         if soft_message is not None and self.training:
             msg_emb = self.continuous_proj(soft_message)
         else:
             msg_emb = self.symbol_embed(message)
+        
+        # If we have message lengths, mask out padding (symbols after stop token)
+        if message_lengths is not None and self.use_stop_token:
+            # Create mask: True for valid positions, False for padding
+            batch_size, seq_len = message.shape
+            # Create position indices [batch, seq_len]
+            positions = torch.arange(seq_len, device=message.device).unsqueeze(0).expand(batch_size, -1)
+            # Mask is True where position < message_length
+            mask = positions < message_lengths.unsqueeze(1)
+            # Zero out embeddings after stop token
+            msg_emb = msg_emb * mask.unsqueeze(-1).float()
         
         _, (h, _) = self.lstm(msg_emb)
         msg_repr = h.squeeze(0)  # [1, hidden_dim]
@@ -525,31 +658,48 @@ class DecoderSelector(nn.Module):
 class ARCAutoencoder(nn.Module):
     """
     FIXED: Main model with proper gradient flow through communication.
+    Supports variable-length messages via stop tokens.
     """
     def __init__(self, encoder, vocab_size, max_length, num_colors, embedding_dim, hidden_dim, 
                  max_grid_size=30, bottleneck_type='communication', task_type='reconstruction', 
-                 num_conv_layers=2, num_classes=None):
+                 num_conv_layers=2, num_classes=None, receiver_gets_input_puzzle=False,
+                 use_stop_token=False, stop_token_id=None):
         super().__init__()
         self.encoder = encoder
         self.bottleneck_type = bottleneck_type
         self.task_type = task_type
+        self.receiver_gets_input_puzzle = receiver_gets_input_puzzle
+        self.use_stop_token = use_stop_token
+        self.stop_token_id = stop_token_id
         
         if bottleneck_type == 'communication':
-            self.sender = SenderAgent(encoder, vocab_size, max_length)
+            self.sender = SenderAgent(encoder, vocab_size, max_length, use_stop_token=use_stop_token, stop_token_id=stop_token_id)
             if task_type == 'reconstruction':
-                self.receiver = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size)
+                self.receiver = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size, 
+                                             receives_input_puzzle=receiver_gets_input_puzzle,
+                                             use_stop_token=use_stop_token, stop_token_id=stop_token_id)
             elif task_type == 'selection':
-                self.receiver = ReceiverSelector(vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers)
+                # In selection mode, create BOTH receivers
+                self.receiver = ReceiverSelector(vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers,
+                                                use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+                # Add reconstruction receiver for background training
+                self.receiver_reconstructor = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size,
+                                                           receives_input_puzzle=receiver_gets_input_puzzle,
+                                                           use_stop_token=use_stop_token, stop_token_id=stop_token_id)
             elif task_type == 'puzzle_classification':
                 assert num_classes is not None
-                self.receiver = ReceiverPuzzleClassifier(vocab_size, num_classes, hidden_dim)
+                self.receiver = ReceiverPuzzleClassifier(vocab_size, num_classes, hidden_dim,
+                                                        use_stop_token=use_stop_token, stop_token_id=stop_token_id)
             else:
                 raise ValueError(f"Unknown task_type: {task_type}")
         elif bottleneck_type == 'autoencoder':
             if task_type == 'reconstruction':
                 self.decoder = ARCDecoder(encoder.latent_dim, num_colors, hidden_dim, max_grid_size)
             elif task_type == 'selection':
+                # In selection mode, create BOTH decoders
                 self.decoder = DecoderSelector(encoder.latent_dim, num_colors, embedding_dim, hidden_dim, num_conv_layers)
+                # Add reconstruction decoder for background training
+                self.decoder_reconstructor = ARCDecoder(encoder.latent_dim, num_colors, hidden_dim, max_grid_size)
             elif task_type == 'puzzle_classification':
                 raise NotImplementedError("Puzzle classification not yet supported in autoencoder mode")
             else:
@@ -566,7 +716,7 @@ class ARCAutoencoder(nn.Module):
         
         if self.task_type == 'reconstruction':
             if self.bottleneck_type == 'communication':
-                messages, soft_messages = self.sender(x, sizes=sizes, temperature=temperature)
+                messages, soft_messages, message_lengths = self.sender(x, sizes=sizes, temperature=temperature)
                 
                 logits_list = []
                 actual_sizes = []
@@ -574,16 +724,29 @@ class ARCAutoencoder(nn.Module):
                 for i in range(B):
                     single_message = messages[i:i+1]
                     soft_single = soft_messages[i:i+1]
+                    single_length = message_lengths[i:i+1]
                     actual_h, actual_w = sizes[i]
                     
-                    logits = self.receiver(single_message, 
-                                          target_size=(actual_h, actual_w),
-                                          soft_message=soft_single)
+                    # Pass input puzzle to receiver if configured
+                    if self.receiver_gets_input_puzzle:
+                        input_puzzle = x[i:i+1]
+                        input_size = sizes[i]
+                        logits = self.receiver(single_message, 
+                                              target_size=(actual_h, actual_w),
+                                              soft_message=soft_single,
+                                              input_puzzle=input_puzzle,
+                                              input_size=input_size,
+                                              message_lengths=single_length)
+                    else:
+                        logits = self.receiver(single_message, 
+                                              target_size=(actual_h, actual_w),
+                                              soft_message=soft_single,
+                                              message_lengths=single_length)
                     
                     logits_list.append(logits)
                     actual_sizes.append((actual_h, actual_w))
                 
-                return logits_list, actual_sizes, messages
+                return logits_list, actual_sizes, messages, message_lengths
                 
             else:  # autoencoder
                 latent = self.encoder(x, sizes=sizes)
@@ -604,31 +767,77 @@ class ARCAutoencoder(nn.Module):
         
         elif self.task_type == 'selection':
             if self.bottleneck_type == 'communication':
-                messages, soft_messages = self.sender(x, sizes=sizes, temperature=temperature)
+                messages, soft_messages, message_lengths = self.sender(x, sizes=sizes, temperature=temperature)
                 
                 selection_logits_list = []
+                reconstruction_logits_list = []
                 actual_sizes = []
                 
                 for i in range(B):
                     single_message = messages[i:i+1]
                     soft_single = soft_messages[i:i+1]
+                    single_length = message_lengths[i:i+1]
                     candidates = candidates_list[i]
                     candidate_sizes = candidates_sizes_list[i] if candidates_sizes_list is not None else None
                     actual_h, actual_w = sizes[i]
                     
+                    # Selection task
                     sel_logits = self.receiver(single_message, candidates, 
                                               candidate_sizes=candidate_sizes,
-                                              soft_message=soft_single)
+                                              soft_message=soft_single,
+                                              message_lengths=single_length)
                     
                     selection_logits_list.append(sel_logits)
+                    
+                    # Background reconstruction task
+                    # Detach soft_message so gradients only flow to receiver_reconstructor
+                    if self.receiver_gets_input_puzzle:
+                        input_puzzle = x[i:i+1]
+                        input_size = sizes[i]
+                        if self.training:
+                            recon_logits = self.receiver_reconstructor(
+                                single_message, 
+                                target_size=(actual_h, actual_w),
+                                soft_message=soft_single.detach(),
+                                input_puzzle=input_puzzle,
+                                input_size=input_size,
+                                message_lengths=single_length
+                            )
+                        else:
+                            recon_logits = self.receiver_reconstructor(
+                                single_message, 
+                                target_size=(actual_h, actual_w),
+                                soft_message=soft_single,
+                                input_puzzle=input_puzzle,
+                                input_size=input_size,
+                                message_lengths=single_length
+                            )
+                    else:
+                        if self.training:
+                            recon_logits = self.receiver_reconstructor(
+                                single_message, 
+                                target_size=(actual_h, actual_w),
+                                soft_message=soft_single.detach(),
+                                message_lengths=single_length
+                            )
+                        else:
+                            recon_logits = self.receiver_reconstructor(
+                                single_message, 
+                                target_size=(actual_h, actual_w),
+                                soft_message=soft_single,
+                                message_lengths=single_length
+                            )
+                    reconstruction_logits_list.append(recon_logits)
+                    
                     actual_sizes.append((actual_h, actual_w))
                 
-                return selection_logits_list, actual_sizes, messages
+                return selection_logits_list, reconstruction_logits_list, actual_sizes, messages, message_lengths
                 
             else:  # autoencoder
                 latent = self.encoder(x, sizes=sizes)
                 
                 selection_logits_list = []
+                reconstruction_logits_list = []
                 actual_sizes = []
                 
                 for i in range(B):
@@ -637,20 +846,29 @@ class ARCAutoencoder(nn.Module):
                     candidate_sizes = candidates_sizes_list[i] if candidates_sizes_list is not None else None
                     actual_h, actual_w = sizes[i]
                     
+                    # Selection task
                     sel_logits = self.decoder(single_latent, candidates, candidate_sizes=candidate_sizes)
-                    
                     selection_logits_list.append(sel_logits)
+                    
+                    # Background reconstruction task
+                    # Detach latent so gradients only flow to decoder_reconstructor
+                    if self.training:
+                        recon_logits = self.decoder_reconstructor(single_latent.detach(), target_size=(actual_h, actual_w))
+                    else:
+                        recon_logits = self.decoder_reconstructor(single_latent, target_size=(actual_h, actual_w))
+                    reconstruction_logits_list.append(recon_logits)
+                    
                     actual_sizes.append((actual_h, actual_w))
                 
-                return selection_logits_list, actual_sizes, None
+                return selection_logits_list, reconstruction_logits_list, actual_sizes, None
         
         else:  # puzzle_classification
             if self.bottleneck_type == 'communication':
-                messages, soft_messages = self.sender(x, sizes=sizes, temperature=temperature)
+                messages, soft_messages, message_lengths = self.sender(x, sizes=sizes, temperature=temperature)
                 
-                classification_logits = self.receiver(messages, soft_message=soft_messages)
+                classification_logits = self.receiver(messages, soft_message=soft_messages, message_lengths=message_lengths)
                 
-                return classification_logits, sizes, messages
+                return classification_logits, sizes, messages, message_lengths
             
             else:
                 raise NotImplementedError("Puzzle classification not yet supported in autoencoder mode")

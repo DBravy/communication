@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARC Puzzle Solver</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .nav-link {
+            position: absolute;
+            left: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-50%) scale(1.05);
+        }
+        
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .control-section {
+            margin-bottom: 20px;
+        }
+        
+        .control-label {
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        input[type="text"], select {
+            padding: 10px 15px;
+            border: 2px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: 14px;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-finetune {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-finetune:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .status-section {
+            padding: 20px 30px;
+            background: #eff6ff;
+            border-bottom: 2px solid #d0d9ff;
+        }
+        
+        .status-message {
+            font-size: 14px;
+            color: #1e40af;
+        }
+        
+        .loading-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #667eea;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .results-section {
+            padding: 30px;
+        }
+        
+        .section-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .puzzle-info {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .info-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .info-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 5px;
+        }
+        
+        .info-value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        
+        .test-examples {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+        
+        .test-example {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .example-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .example-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+        
+        .accuracy-badge {
+            padding: 6px 14px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: white;
+        }
+        
+        .grids-display {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .grid-container {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .grid-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .arc-grid {
+            display: inline-grid;
+            gap: 1px;
+            padding: 8px;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        
+        .grid-cell {
+            width: 18px;
+            height: 18px;
+            border: 1px solid rgba(0,0,0,0.05);
+        }
+        
+        .message-display {
+            margin-top: 15px;
+            padding: 12px;
+            background: #fff7ed;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+            color: #9a3412;
+            border-left: 4px solid #fb923c;
+        }
+        
+        .error-message {
+            background: #fef2f2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .success-message {
+            background: #f0fdf4;
+            border: 1px solid #86efac;
+            color: #166534;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .checkpoint-list {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        
+        .checkpoint-item {
+            padding: 8px 12px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .checkpoint-item:hover {
+            background: #f9fafb;
+            border-color: #667eea;
+        }
+        
+        .checkpoint-item.selected {
+            background: #eff6ff;
+            border-color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/" class="nav-link">← Training Monitor</a>
+            <h1>ARC Puzzle Solver</h1>
+            <p>Solve individual puzzles using finetuned models</p>
+        </div>
+        
+        <div class="controls">
+            <div class="control-section">
+                <label class="control-label">Puzzle ID</label>
+                <div class="input-group">
+                    <select id="puzzleIdInput" style="flex: 2;">
+                        <option value="">Loading puzzles...</option>
+                    </select>
+                    <button class="btn-primary" onclick="refreshPuzzles()">🔄 Refresh</button>
+                    <button class="btn-primary" onclick="loadPuzzle()">Load Puzzle</button>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <label class="control-label">Checkpoint Selection</label>
+                <div class="input-group">
+                    <select id="checkpointSelect" style="flex: 2;">
+                        <option value="">Loading checkpoints...</option>
+                    </select>
+                    <button class="btn-primary" onclick="refreshCheckpoints()">🔄 Refresh</button>
+                </div>
+            </div>
+            
+            <div class="control-section">
+                <label class="control-label">Actions</label>
+                <div class="input-group">
+                    <button class="btn-finetune" id="finetuneBtn" onclick="finetunePuzzle()" disabled>
+                        Finetune on This Puzzle
+                    </button>
+                    <button class="btn-primary" id="solveBtn" onclick="solvePuzzle()" disabled>
+                        Solve Puzzle
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-section" id="statusSection" style="display: none;">
+            <div class="status-message" id="statusMessage"></div>
+        </div>
+        
+        <div class="results-section" id="resultsSection" style="display: none;">
+            <h2 class="section-title">Puzzle Results</h2>
+            
+            <div class="puzzle-info" id="puzzleInfo"></div>
+            
+            <div class="test-examples" id="testExamples"></div>
+        </div>
+    </div>
+    
+    <script>
+        const ARC_COLORS = [
+            '#000000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+            '#AAAAAA', '#F012BE', '#7FDBFF', '#870C25', '#FF851B'
+        ];
+        
+        let currentPuzzleId = null;
+        let currentResults = null;
+        
+        // Load checkpoints and puzzles on page load
+        window.addEventListener('load', () => {
+            refreshCheckpoints();
+            refreshPuzzles();
+        });
+        
+        function refreshCheckpoints() {
+            fetch('/list_checkpoints')
+                .then(response => response.json())
+                .then(data => {
+                    const select = document.getElementById('checkpointSelect');
+                    select.innerHTML = '<option value="">Select a checkpoint...</option>';
+                    
+                    if (data.checkpoints && data.checkpoints.length > 0) {
+                        data.checkpoints.forEach(checkpoint => {
+                            const option = document.createElement('option');
+                            option.value = checkpoint.path;
+                            
+                            let label = checkpoint.filename;
+                            if (checkpoint.task_type) {
+                                label += ` (${checkpoint.task_type}`;
+                                if (checkpoint.bottleneck_type) {
+                                    label += `, ${checkpoint.bottleneck_type}`;
+                                }
+                                if (checkpoint.epoch) {
+                                    label += `, epoch ${checkpoint.epoch}`;
+                                }
+                                label += ')';
+                            }
+                            
+                            option.textContent = label;
+                            select.appendChild(option);
+                        });
+                    } else {
+                        select.innerHTML = '<option value="">No checkpoints found</option>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading checkpoints:', error);
+                    document.getElementById('checkpointSelect').innerHTML = 
+                        '<option value="">Error loading checkpoints</option>';
+                });
+        }
+        
+        function refreshPuzzles() {
+            const select = document.getElementById('puzzleIdInput');
+            select.innerHTML = '<option value="">Loading puzzles...</option>';
+            
+            fetch('/list_puzzles')
+                .then(response => response.json())
+                .then(data => {
+                    select.innerHTML = '<option value="">Select a puzzle...</option>';
+                    
+                    if (data.puzzle_ids && data.puzzle_ids.length > 0) {
+                        data.puzzle_ids.forEach(puzzleId => {
+                            const option = document.createElement('option');
+                            option.value = puzzleId;
+                            option.textContent = puzzleId;
+                            select.appendChild(option);
+                        });
+                        
+                        showStatus(`Loaded ${data.count} puzzles`);
+                        setTimeout(hideStatus, 2000);
+                    } else {
+                        select.innerHTML = '<option value="">No puzzles found</option>';
+                        showStatus('No puzzles found in dataset');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading puzzles:', error);
+                    select.innerHTML = '<option value="">Error loading puzzles</option>';
+                    showStatus('Error loading puzzles: ' + error.message);
+                });
+        }
+        
+        function showStatus(message, isLoading = false) {
+            const statusSection = document.getElementById('statusSection');
+            const statusMessage = document.getElementById('statusMessage');
+            
+            statusSection.style.display = 'block';
+            statusMessage.innerHTML = isLoading ? 
+                `<span class="loading-spinner"></span>${message}` : message;
+        }
+        
+        function hideStatus() {
+            document.getElementById('statusSection').style.display = 'none';
+        }
+        
+        function loadPuzzle() {
+            const puzzleId = document.getElementById('puzzleIdInput').value;
+            
+            if (!puzzleId) {
+                alert('Please select a puzzle ID');
+                return;
+            }
+            
+            currentPuzzleId = puzzleId;
+            
+            // Enable buttons
+            document.getElementById('finetuneBtn').disabled = false;
+            document.getElementById('solveBtn').disabled = false;
+            
+            // Clear previous results
+            document.getElementById('resultsSection').style.display = 'none';
+            
+            showStatus(`Puzzle ${puzzleId} loaded. Select a checkpoint and action.`);
+        }
+        
+        function finetunePuzzle() {
+            if (!currentPuzzleId) {
+                alert('Please load a puzzle first');
+                return;
+            }
+            
+            const checkpoint = document.getElementById('checkpointSelect').value;
+            
+            if (!confirm(`Finetune on puzzle ${currentPuzzleId}?\n\nThis will train a model specifically for this puzzle and may take several minutes.`)) {
+                return;
+            }
+            
+            showStatus(`Finetuning on puzzle ${currentPuzzleId}...`, true);
+            
+            // Disable buttons during finetuning
+            document.getElementById('finetuneBtn').disabled = true;
+            document.getElementById('solveBtn').disabled = true;
+            
+            fetch('/finetune_puzzle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    puzzle_id: currentPuzzleId,
+                    checkpoint: checkpoint || null,
+                    epochs: 500,
+                    lr: 1e-4,
+                    batch_size: 8
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showStatus(`Error: ${data.error}`);
+                    document.getElementById('finetuneBtn').disabled = false;
+                    document.getElementById('solveBtn').disabled = false;
+                } else {
+                    showStatus(`✓ Finetuning completed! Loss: ${data.train_loss?.toFixed(4) || 'N/A'}, Accuracy: ${data.train_acc?.toFixed(2) || 'N/A'}%`);
+                    document.getElementById('finetuneBtn').disabled = false;
+                    document.getElementById('solveBtn').disabled = false;
+                    
+                    // Refresh checkpoints to show the new one
+                    refreshCheckpoints();
+                }
+            })
+            .catch(error => {
+                showStatus(`Error during finetuning: ${error.message}`);
+                document.getElementById('finetuneBtn').disabled = false;
+                document.getElementById('solveBtn').disabled = false;
+            });
+        }
+        
+        function solvePuzzle() {
+            if (!currentPuzzleId) {
+                alert('Please load a puzzle first');
+                return;
+            }
+            
+            const checkpoint = document.getElementById('checkpointSelect').value;
+            
+            if (!checkpoint) {
+                alert('Please select a checkpoint');
+                return;
+            }
+            
+            showStatus(`Solving puzzle ${currentPuzzleId}...`, true);
+            
+            // Disable buttons during solving
+            document.getElementById('solveBtn').disabled = true;
+            
+            fetch('/solve_puzzle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    puzzle_id: currentPuzzleId,
+                    checkpoint: checkpoint
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showStatus(`Error: ${data.error}`);
+                    document.getElementById('solveBtn').disabled = false;
+                } else {
+                    currentResults = data;
+                    displayResults(data);
+                    hideStatus();
+                    document.getElementById('solveBtn').disabled = false;
+                }
+            })
+            .catch(error => {
+                showStatus(`Error during solving: ${error.message}`);
+                document.getElementById('solveBtn').disabled = false;
+            });
+        }
+        
+        function renderGrid(gridData, containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            const rows = gridData.length;
+            const cols = gridData[0].length;
+            
+            const gridElement = document.createElement('div');
+            gridElement.className = 'arc-grid';
+            gridElement.style.gridTemplateColumns = `repeat(${cols}, 18px)`;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+                    const colorValue = gridData[r][c];
+                    cell.style.backgroundColor = ARC_COLORS[colorValue] || '#ffffff';
+                    gridElement.appendChild(cell);
+                }
+            }
+            
+            container.appendChild(gridElement);
+        }
+        
+        function displayResults(results) {
+            const resultsSection = document.getElementById('resultsSection');
+            const puzzleInfo = document.getElementById('puzzleInfo');
+            const testExamples = document.getElementById('testExamples');
+            
+            resultsSection.style.display = 'block';
+            
+            // Display puzzle info
+            const accuracyColor = results.num_correct === results.num_test_examples ? '#10b981' : 
+                                  results.num_correct > 0 ? '#f59e0b' : '#ef4444';
+            
+            puzzleInfo.innerHTML = `
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Puzzle ID</div>
+                        <div class="info-value">${results.puzzle_id}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Test Examples</div>
+                        <div class="info-value">${results.num_test_examples}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Exact Matches</div>
+                        <div class="info-value" style="color: ${accuracyColor}">
+                            ${results.num_correct}/${results.num_test_examples}
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Avg Pixel Accuracy</div>
+                        <div class="info-value" style="color: ${accuracyColor}">
+                            ${results.avg_pixel_accuracy.toFixed(2)}%
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Display test examples
+            testExamples.innerHTML = '';
+            
+            results.predictions.forEach((pred, idx) => {
+                const exampleDiv = document.createElement('div');
+                exampleDiv.className = 'test-example';
+                
+                const badgeColor = pred.exact_match ? '#10b981' : '#ef4444';
+                const badgeText = pred.exact_match ? 
+                    `✓ Exact Match (${pred.pixel_accuracy.toFixed(1)}%)` : 
+                    `✗ ${pred.pixel_accuracy.toFixed(1)}% Accurate`;
+                
+                const messageHTML = pred.messages ? `
+                    <div class="message-display">
+                        <strong>Message:</strong> [${pred.messages.join(', ')}]
+                    </div>
+                ` : '';
+                
+                exampleDiv.innerHTML = `
+                    <div class="example-header">
+                        <span class="example-title">Test Example ${pred.example_id + 1}</span>
+                        <span class="accuracy-badge" style="background: ${badgeColor}">
+                            ${badgeText}
+                        </span>
+                    </div>
+                    <div class="grids-display">
+                        <div class="grid-container">
+                            <div class="grid-label">INPUT (${pred.input_size[0]}×${pred.input_size[1]})</div>
+                            <div id="input-${idx}" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-container">
+                            <div class="grid-label">TARGET OUTPUT (${pred.output_size[0]}×${pred.output_size[1]})</div>
+                            <div id="target-${idx}" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-container">
+                            <div class="grid-label">PREDICTED OUTPUT</div>
+                            <div id="predicted-${idx}" style="text-align: center;"></div>
+                        </div>
+                    </div>
+                    ${messageHTML}
+                `;
+                
+                testExamples.appendChild(exampleDiv);
+                
+                // Render grids after adding to DOM
+                setTimeout(() => {
+                    renderGrid(pred.input, `input-${idx}`);
+                    renderGrid(pred.target, `target-${idx}`);
+                    renderGrid(pred.predicted, `predicted-${idx}`);
+                }, 0);
+            });
+            
+            // Scroll to results
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
+

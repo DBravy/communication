@@ -48,6 +48,7 @@ def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, traini
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
         'use_input_output_pairs': training_state['use_input_output_pairs'],
+        'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         
         # Data configuration
         'max_grids': training_state['max_grids'],
@@ -62,6 +63,7 @@ def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, traini
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
+        'use_stop_token': training_state['use_stop_token'],
         
         # Training hyperparameters
         'batch_size': training_state['batch_size'],
@@ -93,6 +95,7 @@ training_state = {
     'num_distractors': getattr(config, 'NUM_DISTRACTORS', 3),
     'bottleneck_type': getattr(config, 'BOTTLENECK_TYPE', 'communication'),
     'use_input_output_pairs': getattr(config, 'USE_INPUT_OUTPUT_PAIRS', False),
+    'receiver_gets_input_puzzle': getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False),
     # Data configuration
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
@@ -104,6 +107,7 @@ training_state = {
     'vocab_size': getattr(config, 'VOCAB_SIZE', 100),
     'max_message_length': getattr(config, 'MAX_MESSAGE_LENGTH', 3),
     'temperature': getattr(config, 'TEMPERATURE', 1.0),
+    'use_stop_token': getattr(config, 'USE_STOP_TOKEN', False),
     # Training hyperparameters
     'batch_size': getattr(config, 'BATCH_SIZE', 32),
     'learning_rate': getattr(config, 'LEARNING_RATE', 1e-5),
@@ -344,12 +348,24 @@ def get_reconstructions(model, grids, sizes, device, num_samples=1):
         input_grid = grid[:actual_h, :actual_w].cpu().numpy()
         
         single_grid = grid.unsqueeze(0)
-        logits_list, _, messages = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+        model_output = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+        
+        # Unpack based on number of return values (handle stop tokens)
+        message_lengths = None
+        if len(model_output) == 4:  # reconstruction with message_lengths
+            logits_list, _, messages, message_lengths = model_output
+        else:  # autoencoder mode
+            logits_list, _, messages = model_output
+        
         recon = logits_list[0].argmax(dim=1).squeeze(0).cpu().numpy()
         
         # Only get message if in communication mode
         if training_state['bottleneck_type'] == 'communication' and messages is not None:
             msg = messages[0].cpu().tolist()
+            # Truncate to actual length if stop tokens are enabled
+            if message_lengths is not None:
+                actual_length = message_lengths[0].item()
+                msg = msg[:actual_length]  # Only include up to stop token
         else:
             msg = None  # No message in autoencoder mode
         
@@ -387,7 +403,14 @@ def get_classification_preview(model, grids, sizes, device):
         input_grid = grid[:actual_h, :actual_w].cpu().numpy()
         
         single_grid = grid.unsqueeze(0)
-        classification_logits, _, messages = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+        model_output = model(single_grid, [(actual_h, actual_w)], temperature=1.0)
+        
+        # Unpack based on number of return values (handle stop tokens)
+        if len(model_output) == 4:  # puzzle_classification with message_lengths
+            classification_logits, _, messages, message_lengths = model_output
+        else:
+            classification_logits, _, messages = model_output
+            message_lengths = None
         
         # Get probabilities and prediction
         probs = torch.softmax(classification_logits[0], dim=0).cpu().numpy()
@@ -395,7 +418,15 @@ def get_classification_preview(model, grids, sizes, device):
         
         # Get message
         if training_state['bottleneck_type'] == 'communication':
-                message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+            sender_output = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+            if len(sender_output) == 3:  # with message_lengths
+                message, _, msg_lengths = sender_output
+                msg = message[0].cpu().tolist()
+                # Truncate to actual length
+                actual_length = msg_lengths[0].item()
+                msg = msg[:actual_length]
+            else:
+                message, _ = sender_output
                 msg = message[0].cpu().tolist()
         else:
             msg = None  # No message in autoencoder mode
@@ -450,20 +481,35 @@ def get_selections(model, batch_data, device, task_type):
         target_idx = target_indices[i]
         
         # Forward pass
-        selection_logits_list, _, messages = model(
+        model_output = model(
             single_grid, [(actual_h, actual_w)], temperature=1.0,
             candidates_list=[candidates],
             candidates_sizes_list=[candidate_sizes],
             target_indices=target_idx.unsqueeze(0)
         )
         
+        # Unpack based on number of return values (handle stop tokens)
+        if len(model_output) == 5:  # selection with message_lengths
+            selection_logits_list, reconstruction_logits_list, _, messages, message_lengths = model_output
+        else:  # autoencoder mode
+            selection_logits_list, reconstruction_logits_list, _, messages = model_output
+            message_lengths = None
+        
         sel_logits = selection_logits_list[0]
         probs = torch.softmax(sel_logits, dim=0).cpu().numpy()
         pred_idx = sel_logits.argmax().item()
         
         if training_state['bottleneck_type'] == 'communication':
-            message, _ = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
-            msg = message[0].cpu().tolist()
+            sender_output = model.sender(single_grid, sizes=[(actual_h, actual_w)], temperature=1.0)
+            if len(sender_output) == 3:  # with message_lengths
+                message, _, msg_lengths = sender_output
+                msg = message[0].cpu().tolist()
+                # Truncate to actual length
+                actual_length = msg_lengths[0].item()
+                msg = msg[:actual_length]
+            else:
+                message, _ = sender_output
+                msg = message[0].cpu().tolist()
         else:
             msg = None  # No message in autoencoder mode
         
@@ -496,7 +542,6 @@ def get_selections(model, batch_data, device, task_type):
     
     model.train()
     return selections
-
 
 def pretrain_worker():
     """Background pretraining worker."""
@@ -1020,6 +1065,9 @@ def train_worker():
         else:
             print('[MAIN TRAIN] Training from scratch (pretrained encoder disabled)')
         
+        receiver_gets_input_puzzle = training_state.get('receiver_gets_input_puzzle', False)
+        use_stop_token = training_state.get('use_stop_token', False)
+        stop_token_id = training_state['vocab_size'] if use_stop_token else None
         model = ARCAutoencoder(
             encoder=encoder,
             vocab_size=training_state['vocab_size'],
@@ -1031,7 +1079,10 @@ def train_worker():
             bottleneck_type=training_state['bottleneck_type'],
             task_type=task_type,
             num_conv_layers=training_state['num_conv_layers'],
-            num_classes=num_classes
+            num_classes=num_classes,
+            receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+            use_stop_token=use_stop_token,
+            stop_token_id=stop_token_id
         ).to(device)
         
         # MAIN TRAINING STEP 2: Optionally freeze encoder weights during main training
@@ -1104,7 +1155,11 @@ def train_worker():
                 
                 if task_type == 'puzzle_classification':
                     # Puzzle classification task (no I/O pairs)
-                    classification_logits, _, messages = model(input_grids, input_sizes, temperature=training_state['temperature'], labels=labels)
+                    model_output = model(input_grids, input_sizes, temperature=training_state['temperature'], labels=labels)
+                    if len(model_output) == 4:  # with message_lengths
+                        classification_logits, _, messages, message_lengths = model_output
+                    else:
+                        classification_logits, _, messages = model_output
                     
                     # Compute classification loss
                     loss = criterion(classification_logits, labels)
@@ -1114,13 +1169,17 @@ def train_worker():
                     batch_correct = (pred == labels).sum().item()
                     batch_total = labels.size(0)
                 elif task_type == 'selection':
-                    # Selection task
-                    selection_logits_list, actual_sizes, messages = model(
+                    # Selection task (now also returns reconstruction logits)
+                    model_output = model(
                         input_grids, input_sizes, temperature=training_state['temperature'],
                         candidates_list=candidates_list, 
                         candidates_sizes_list=candidates_sizes_list,
                         target_indices=target_indices
                     )
+                    if len(model_output) == 5:  # with message_lengths
+                        selection_logits_list, reconstruction_logits_list, actual_sizes, messages, message_lengths = model_output
+                    else:  # autoencoder mode
+                        selection_logits_list, reconstruction_logits_list, actual_sizes, messages = model_output
                     
                     batch_loss = 0
                     batch_correct = 0
@@ -1140,7 +1199,11 @@ def train_worker():
                     # Reconstruction task
                     if use_input_output_pairs:
                         # Use input to generate message, reconstruct output
-                        logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        model_output = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        if len(model_output) == 4:  # with message_lengths
+                            logits_list, actual_sizes, messages, message_lengths = model_output
+                        else:  # autoencoder mode
+                            logits_list, actual_sizes, messages = model_output
                         
                         # Compute reconstruction loss for each sample (target is OUTPUT)
                         batch_loss = 0
@@ -1167,7 +1230,11 @@ def train_worker():
                         loss = batch_loss / len(logits_list)
                     else:
                         # Original: reconstruct the same grid
-                        logits_list, actual_sizes, messages = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        model_output = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        if len(model_output) == 4:  # with message_lengths
+                            logits_list, actual_sizes, messages, message_lengths = model_output
+                        else:  # autoencoder mode
+                            logits_list, actual_sizes, messages = model_output
                         
                         # Compute reconstruction loss for each sample
                         batch_loss = 0
@@ -1298,6 +1365,28 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/puzzle_solver')
+def puzzle_solver():
+    return render_template('puzzle_solver.html')
+
+
+@app.route('/list_puzzles', methods=['GET'])
+def list_puzzles():
+    """List all available puzzle IDs from the dataset."""
+    try:
+        from puzzle_dataset import load_all_puzzle_ids
+        
+        puzzle_ids = load_all_puzzle_ids(config.DATA_PATH)
+        
+        return jsonify({
+            'puzzle_ids': puzzle_ids,
+            'count': len(puzzle_ids)
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/start_pretrain', methods=['POST'])
 def start_pretrain():
     global training_thread, training_state
@@ -1423,6 +1512,7 @@ def get_task_config():
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
         'use_input_output_pairs': training_state['use_input_output_pairs'],
+        'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         # Data configuration
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
@@ -1434,6 +1524,7 @@ def get_task_config():
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
+        'use_stop_token': training_state['use_stop_token'],
         # Training hyperparameters
         'batch_size': training_state['batch_size'],
         'learning_rate': training_state['learning_rate'],
@@ -1465,6 +1556,8 @@ def set_task_config():
         training_state['bottleneck_type'] = data['bottleneck_type']
     if 'use_input_output_pairs' in data:
         training_state['use_input_output_pairs'] = bool(data['use_input_output_pairs'])
+    if 'receiver_gets_input_puzzle' in data:
+        training_state['receiver_gets_input_puzzle'] = bool(data['receiver_gets_input_puzzle'])
     
     # Data configuration
     if 'max_grids' in data:
@@ -1487,6 +1580,8 @@ def set_task_config():
         training_state['max_message_length'] = int(data['max_message_length'])
     if 'temperature' in data:
         training_state['temperature'] = float(data['temperature'])
+    if 'use_stop_token' in data:
+        training_state['use_stop_token'] = bool(data['use_stop_token'])
     
     # Training hyperparameters
     if 'batch_size' in data:
@@ -1516,6 +1611,7 @@ def set_task_config():
         'num_distractors': training_state['num_distractors'],
         'bottleneck_type': training_state['bottleneck_type'],
         'use_input_output_pairs': training_state['use_input_output_pairs'],
+        'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         'hidden_dim': training_state['hidden_dim'],
@@ -1524,6 +1620,7 @@ def set_task_config():
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
+        'use_stop_token': training_state['use_stop_token'],
         'batch_size': training_state['batch_size'],
         'learning_rate': training_state['learning_rate'],
         'pretrain_learning_rate': training_state['pretrain_learning_rate'],
@@ -1694,6 +1791,192 @@ def stream():
                 time.sleep(0.5)
     
     return Response(generate(), mimetype='text/event-stream')
+
+@app.route('/finetune_puzzle', methods=['POST'])
+def finetune_puzzle_route():
+    """Finetune a model on a specific puzzle."""
+    data = json.loads(request.data)
+    puzzle_id = data.get('puzzle_id')
+    checkpoint_path = data.get('checkpoint')
+    epochs = data.get('epochs', 500)
+    lr = data.get('lr', 1e-4)
+    batch_size = data.get('batch_size', 8)
+    
+    if not puzzle_id:
+        return jsonify({'error': 'puzzle_id is required'}), 400
+    
+    try:
+        # Import here to avoid circular imports
+        import subprocess
+        
+        # Build finetune command
+        cmd_parts = [
+            'python', 'finetune_puzzle.py',
+            '--puzzle_id', puzzle_id,
+            '--data_path', config.DATA_PATH,
+            '--epochs', str(epochs),
+            '--lr', str(lr),
+            '--batch_size', str(batch_size),
+            '--save_dir', 'puzzle_checkpoints'
+        ]
+        
+        if checkpoint_path:
+            cmd_parts.extend(['--checkpoint', checkpoint_path])
+        
+        # Run finetuning
+        result = subprocess.run(
+            cmd_parts,
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Finetuning failed: {result.stderr}'}), 500
+        
+        # Load the saved checkpoint to get metrics
+        checkpoint_file = os.path.join('puzzle_checkpoints', f'{puzzle_id}_best.pth')
+        if os.path.exists(checkpoint_file):
+            checkpoint = torch.load(checkpoint_file, map_location='cpu')
+            return jsonify({
+                'status': 'success',
+                'puzzle_id': puzzle_id,
+                'checkpoint_path': checkpoint_file,
+                'train_loss': checkpoint.get('train_loss'),
+                'train_acc': checkpoint.get('train_acc')
+            })
+        else:
+            return jsonify({'error': 'Finetuning completed but checkpoint not found'}), 500
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/solve_puzzle', methods=['POST'])
+def solve_puzzle_route():
+    """Solve a puzzle using a finetuned model."""
+    data = json.loads(request.data)
+    puzzle_id = data.get('puzzle_id')
+    checkpoint_path = data.get('checkpoint')
+    
+    if not puzzle_id:
+        return jsonify({'error': 'puzzle_id is required'}), 400
+    
+    if not checkpoint_path:
+        return jsonify({'error': 'checkpoint is required'}), 400
+    
+    try:
+        # Import puzzle solving functions
+        from puzzle_dataset import ARCSinglePuzzleDataset
+        from model import ARCEncoder, ARCAutoencoder
+        
+        # Load test dataset
+        test_dataset = ARCSinglePuzzleDataset(config.DATA_PATH, puzzle_id, split='test')
+        
+        # Load model
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        encoder = ARCEncoder(
+            num_colors=config.NUM_COLORS,
+            embedding_dim=config.EMBEDDING_DIM,
+            hidden_dim=config.HIDDEN_DIM,
+            latent_dim=config.LATENT_DIM,
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+        )
+        
+        if not os.path.exists(checkpoint_path):
+            return jsonify({'error': f'Checkpoint not found: {checkpoint_path}'}), 404
+        
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        
+        # Load receiver_gets_input_puzzle and use_stop_token from checkpoint if available, otherwise use config default
+        receiver_gets_input_puzzle = checkpoint.get('receiver_gets_input_puzzle', getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False))
+        use_stop_token = checkpoint.get('use_stop_token', getattr(config, 'USE_STOP_TOKEN', False))
+        # Get vocab_size from checkpoint or config, then calculate stop_token_id
+        checkpoint_vocab_size = checkpoint.get('vocab_size', config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None)
+        stop_token_id = checkpoint_vocab_size if use_stop_token else None
+        
+        model = ARCAutoencoder(
+            encoder=encoder,
+            vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
+            max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+            num_colors=config.NUM_COLORS,
+            embedding_dim=config.EMBEDDING_DIM,
+            hidden_dim=config.HIDDEN_DIM,
+            max_grid_size=config.MAX_GRID_SIZE,
+            bottleneck_type=config.BOTTLENECK_TYPE,
+            task_type='reconstruction',
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+            receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+            use_stop_token=use_stop_token,
+            stop_token_id=stop_token_id
+        ).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        # Solve all test examples
+        results = {
+            'puzzle_id': puzzle_id,
+            'num_test_examples': len(test_dataset),
+            'predictions': []
+        }
+        
+        for i in range(len(test_dataset)):
+            input_grid, input_size, output_grid, output_size = test_dataset[i]
+            
+            # Get actual grids (without padding)
+            input_h, input_w = input_size
+            output_h, output_w = output_size
+            
+            input_actual = input_grid[:input_h, :input_w].numpy()
+            output_actual = output_grid[:output_h, :output_w].numpy()
+            
+            # Generate prediction
+            with torch.no_grad():
+                input_batch = input_grid.unsqueeze(0).to(device)
+                model_output = model(input_batch, [input_size], temperature=1.0)
+                
+                # Unpack based on number of return values
+                if len(model_output) == 4:  # with message_lengths
+                    logits_list, _, messages, message_lengths = model_output
+                else:  # autoencoder mode
+                    logits_list, _, messages = model_output
+                
+                logits = logits_list[0]
+                pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
+                predicted = pred[:output_h, :output_w]
+            
+            # Evaluate
+            exact_match = np.array_equal(predicted, output_actual)
+            correct_pixels = (predicted == output_actual).sum()
+            total_pixels = predicted.size
+            pixel_accuracy = 100.0 * correct_pixels / total_pixels
+            
+            # Store results
+            prediction_result = {
+                'example_id': i,
+                'input_size': list(input_size),
+                'output_size': list(output_size),
+                'exact_match': bool(exact_match),
+                'pixel_accuracy': float(pixel_accuracy),
+                'input': input_actual.tolist(),
+                'target': output_actual.tolist(),
+                'predicted': predicted.tolist(),
+                'messages': messages[0].cpu().tolist() if messages is not None else None
+            }
+            results['predictions'].append(prediction_result)
+        
+        # Calculate summary stats
+        results['num_correct'] = sum(1 for p in results['predictions'] if p['exact_match'])
+        results['avg_pixel_accuracy'] = float(np.mean([p['pixel_accuracy'] for p in results['predictions']]))
+        
+        return jsonify(results)
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', debug=False, threaded=True, port=5002)
