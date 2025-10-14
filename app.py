@@ -149,6 +149,29 @@ stop_flag = threading.Event()
 status_queue = queue.Queue()
 save_checkpoint_queue = queue.Queue()  # Queue for checkpoint save requests
 
+# Finetuning state and queues
+finetuning_thread = None
+finetuning_progress_queue = queue.Queue()
+finetuning_state = {
+    'running': False,
+    'puzzle_id': None,
+    'epoch': 0,
+    'total_epochs': 0,
+    'loss': 0,
+    'accuracy': 0
+}
+
+# Batch testing state and queues
+batch_test_thread = None
+batch_test_progress_queue = queue.Queue()
+batch_test_state = {
+    'running': False,
+    'current_puzzle_index': 0,
+    'total_puzzles': 0,
+    'current_puzzle_id': None,
+    'results': []
+}
+
 # Store historical metrics for persistence across page reloads
 # Limit to 5000 points to avoid excessive memory usage
 MAX_HISTORY_POINTS = 5000
@@ -1384,6 +1407,542 @@ def train_worker():
         training_state['mode'] = None
         metrics_queue.put({'status': 'error', 'message': str(e)})
 
+
+def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold):
+    """Background batch testing worker - finetunes and solves multiple puzzles."""
+    global batch_test_state
+    
+    try:
+        from puzzle_dataset import ARCSinglePuzzleDataset, collate_fn_puzzle
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        batch_test_state['running'] = True
+        batch_test_state['total_puzzles'] = len(puzzle_ids)
+        batch_test_state['current_puzzle_index'] = 0
+        batch_test_state['results'] = []
+        
+        # Send start message
+        batch_test_progress_queue.put({
+            'status': 'started',
+            'total_puzzles': len(puzzle_ids),
+            'puzzle_ids': puzzle_ids
+        })
+        
+        # Get data path
+        data_path = get_data_path(dataset_version, dataset_split)
+        
+        for idx, puzzle_id in enumerate(puzzle_ids):
+            batch_test_state['current_puzzle_index'] = idx
+            batch_test_state['current_puzzle_id'] = puzzle_id
+            
+            # Send puzzle start message
+            batch_test_progress_queue.put({
+                'status': 'puzzle_started',
+                'puzzle_id': puzzle_id,
+                'puzzle_index': idx + 1,
+                'total_puzzles': len(puzzle_ids)
+            })
+            
+            try:
+                # STEP 1: Finetune on this puzzle
+                batch_test_progress_queue.put({
+                    'status': 'finetuning',
+                    'puzzle_id': puzzle_id,
+                    'puzzle_index': idx + 1
+                })
+                
+                # Load dataset
+                train_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='train')
+                train_loader = DataLoader(
+                    train_dataset,
+                    batch_size=batch_size,
+                    shuffle=True,
+                    collate_fn=collate_fn_puzzle,
+                    num_workers=0
+                )
+                
+                # Create model
+                receiver_gets_input_puzzle = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+                
+                encoder = ARCEncoder(
+                    num_colors=config.NUM_COLORS,
+                    embedding_dim=config.EMBEDDING_DIM,
+                    hidden_dim=config.HIDDEN_DIM,
+                    latent_dim=config.LATENT_DIM,
+                    num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+                )
+                
+                model = ARCAutoencoder(
+                    encoder=encoder,
+                    vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
+                    max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+                    num_colors=config.NUM_COLORS,
+                    embedding_dim=config.EMBEDDING_DIM,
+                    hidden_dim=config.HIDDEN_DIM,
+                    max_grid_size=config.MAX_GRID_SIZE,
+                    bottleneck_type=config.BOTTLENECK_TYPE,
+                    task_type='reconstruction',
+                    num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+                    receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+                    use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
+                    stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
+                ).to(device)
+                
+                # Load checkpoint if provided
+                if checkpoint_path and os.path.exists(checkpoint_path):
+                    checkpoint = torch.load(checkpoint_path, map_location=device)
+                    state_dict = checkpoint.get('model_state_dict', checkpoint)
+                    
+                    if 'receiver_reconstructor.symbol_embed.weight' in state_dict or \
+                       'decoder_reconstructor.fc_decode.weight' in state_dict:
+                        new_state_dict = {}
+                        for k, v in state_dict.items():
+                            if k.startswith('receiver_reconstructor.'):
+                                new_key = k.replace('receiver_reconstructor.', 'receiver.')
+                                new_state_dict[new_key] = v
+                            elif k.startswith('decoder_reconstructor.'):
+                                new_key = k.replace('decoder_reconstructor.', 'decoder.')
+                                new_state_dict[new_key] = v
+                            elif k.startswith('encoder.') or k.startswith('sender.'):
+                                new_state_dict[k] = v
+                        model.load_state_dict(new_state_dict, strict=False)
+                    else:
+                        if 'model_state_dict' in checkpoint:
+                            model.load_state_dict(checkpoint['model_state_dict'])
+                        elif 'encoder_state_dict' in checkpoint:
+                            encoder.load_state_dict(checkpoint['encoder_state_dict'])
+                
+                criterion = nn.CrossEntropyLoss()
+                optimizer = optim.Adam(model.parameters(), lr=lr)
+                
+                best_loss = float('inf')
+                best_acc = 0.0
+                save_dir = 'puzzle_checkpoints'
+                os.makedirs(save_dir, exist_ok=True)
+                
+                # Finetune for specified epochs
+                for epoch in range(epochs):
+                    model.train()
+                    total_loss = 0
+                    correct = 0
+                    total = 0
+                    
+                    for input_grids, input_sizes, output_grids, output_sizes in train_loader:
+                        input_grids = input_grids.to(device)
+                        output_grids = output_grids.to(device)
+                        
+                        optimizer.zero_grad()
+                        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
+                        
+                        batch_loss = 0
+                        batch_correct = 0
+                        batch_total = 0
+                        
+                        for i, logits in enumerate(logits_list):
+                            output_h, output_w = output_sizes[i]
+                            H, W = logits.shape[2], logits.shape[3]
+                            target_grid = output_grids[i:i+1, :H, :W]
+                            
+                            logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                            targets_flat = target_grid.reshape(-1)
+                            
+                            sample_loss = criterion(logits_flat, targets_flat)
+                            batch_loss += sample_loss
+                            
+                            pred = logits.argmax(dim=1).squeeze(0)
+                            target = target_grid.squeeze(0)
+                            sample_correct = (pred[:output_h, :output_w] == target[:output_h, :output_w]).sum().item()
+                            sample_total = output_h * output_w
+                            
+                            batch_correct += sample_correct
+                            batch_total += sample_total
+                        
+                        loss = batch_loss / len(logits_list)
+                        loss.backward()
+                        optimizer.step()
+                        
+                        total_loss += loss.item()
+                        correct += batch_correct
+                        total += batch_total
+                    
+                    avg_loss = total_loss / len(train_loader)
+                    accuracy = 100.0 * correct / total if total > 0 else 0.0
+                    
+                    # Send epoch progress update (every 10 epochs or if early stopping)
+                    if (epoch + 1) % 10 == 0 or epoch == 0 or accuracy >= early_stop_threshold:
+                        batch_test_progress_queue.put({
+                            'status': 'finetune_progress',
+                            'puzzle_id': puzzle_id,
+                            'puzzle_index': idx + 1,
+                            'epoch': epoch + 1,
+                            'total_epochs': epochs,
+                            'loss': avg_loss,
+                            'accuracy': accuracy
+                        })
+                    
+                    # Save best model
+                    if avg_loss < best_loss:
+                        best_loss = avg_loss
+                        best_acc = accuracy
+                        save_path = os.path.join(save_dir, f'{puzzle_id}_best.pth')
+                        torch.save({
+                            'epoch': epoch,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'train_loss': avg_loss,
+                            'train_acc': accuracy,
+                            'puzzle_id': puzzle_id,
+                            'bottleneck_type': config.BOTTLENECK_TYPE,
+                        }, save_path)
+                    
+                    # Early stopping check
+                    if accuracy >= early_stop_threshold:
+                        break
+                
+                finetune_checkpoint = os.path.join(save_dir, f'{puzzle_id}_best.pth')
+                
+                # STEP 2: Solve using the finetuned model
+                batch_test_progress_queue.put({
+                    'status': 'solving',
+                    'puzzle_id': puzzle_id,
+                    'puzzle_index': idx + 1,
+                    'finetune_loss': best_loss,
+                    'finetune_acc': best_acc
+                })
+                
+                # Load test dataset
+                test_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='test')
+                
+                model.eval()
+                num_correct = 0
+                total_pixel_acc = 0
+                last_example_grids = None  # Store the last test example for display
+                
+                with torch.no_grad():
+                    for i in range(len(test_dataset)):
+                        input_grid, input_size, output_grid, output_size = test_dataset[i]
+                        
+                        input_h, input_w = input_size
+                        output_h, output_w = output_size
+                        
+                        input_actual = input_grid[:input_h, :input_w].numpy()
+                        output_actual = output_grid[:output_h, :output_w].numpy()
+                        
+                        input_batch = input_grid.unsqueeze(0).to(device)
+                        logits_list, _, _, _ = model(input_batch, [input_size], temperature=1.0)
+                        
+                        logits = logits_list[0]
+                        pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
+                        predicted = pred[:output_h, :output_w]
+                        
+                        # Calculate accuracy
+                        if predicted.shape == output_actual.shape:
+                            exact_match = np.array_equal(predicted, output_actual)
+                            correct_pixels = (predicted == output_actual).sum()
+                            total_pixels = predicted.size
+                        else:
+                            exact_match = False
+                            min_h = min(predicted.shape[0], output_actual.shape[0])
+                            min_w = min(predicted.shape[1], output_actual.shape[1])
+                            correct_pixels = (predicted[:min_h, :min_w] == output_actual[:min_h, :min_w]).sum() if min_h > 0 and min_w > 0 else 0
+                            total_pixels = output_actual.size
+                        
+                        pixel_accuracy = 100.0 * correct_pixels / total_pixels if total_pixels > 0 else 0.0
+                        
+                        if exact_match:
+                            num_correct += 1
+                        total_pixel_acc += pixel_accuracy
+                        
+                        # Store the last example for visualization
+                        last_example_grids = {
+                            'input': input_actual.tolist(),
+                            'target': output_actual.tolist(),
+                            'predicted': predicted.tolist(),
+                            'input_size': [int(input_h), int(input_w)],
+                            'output_size': [int(output_h), int(output_w)],
+                            'exact_match': bool(exact_match),
+                            'pixel_accuracy': float(pixel_accuracy)
+                        }
+                
+                avg_pixel_acc = total_pixel_acc / len(test_dataset) if len(test_dataset) > 0 else 0.0
+                
+                # Store result
+                result = {
+                    'puzzle_id': puzzle_id,
+                    'num_test_examples': len(test_dataset),
+                    'num_correct': num_correct,
+                    'avg_pixel_accuracy': avg_pixel_acc,
+                    'finetune_loss': best_loss,
+                    'finetune_acc': best_acc,
+                    'success': True
+                }
+                
+                batch_test_state['results'].append(result)
+                
+                # Send puzzle completion with grid visualization
+                batch_test_progress_queue.put({
+                    'status': 'puzzle_completed',
+                    'puzzle_id': puzzle_id,
+                    'puzzle_index': idx + 1,
+                    'result': result,
+                    'last_example': last_example_grids  # Include grid data for visualization
+                })
+                
+            except Exception as e:
+                # Record error for this puzzle
+                error_result = {
+                    'puzzle_id': puzzle_id,
+                    'error': str(e),
+                    'success': False
+                }
+                batch_test_state['results'].append(error_result)
+                
+                batch_test_progress_queue.put({
+                    'status': 'puzzle_error',
+                    'puzzle_id': puzzle_id,
+                    'puzzle_index': idx + 1,
+                    'error': str(e)
+                })
+        
+        # Send completion message
+        batch_test_progress_queue.put({
+            'status': 'completed',
+            'total_puzzles': len(puzzle_ids),
+            'results': batch_test_state['results']
+        })
+        
+        batch_test_state['running'] = False
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        batch_test_progress_queue.put({
+            'status': 'error',
+            'message': str(e)
+        })
+        batch_test_state['running'] = False
+
+
+def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold=99.0):
+    """Background finetuning worker with progress reporting."""
+    global finetuning_state
+    
+    try:
+        from puzzle_dataset import ARCSinglePuzzleDataset, collate_fn_puzzle
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        finetuning_state['running'] = True
+        finetuning_state['puzzle_id'] = puzzle_id
+        finetuning_state['total_epochs'] = epochs
+        finetuning_state['epoch'] = 0
+        
+        # Send start message
+        finetuning_progress_queue.put({
+            'status': 'started',
+            'puzzle_id': puzzle_id,
+            'total_epochs': epochs,
+            'early_stop_threshold': early_stop_threshold
+        })
+        
+        # Get data path
+        data_path = get_data_path(dataset_version, dataset_split)
+        
+        # Load dataset
+        train_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='train')
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            collate_fn=collate_fn_puzzle,
+            num_workers=0
+        )
+        
+        # Create model
+        receiver_gets_input_puzzle = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+        
+        encoder = ARCEncoder(
+            num_colors=config.NUM_COLORS,
+            embedding_dim=config.EMBEDDING_DIM,
+            hidden_dim=config.HIDDEN_DIM,
+            latent_dim=config.LATENT_DIM,
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+        )
+        
+        model = ARCAutoencoder(
+            encoder=encoder,
+            vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
+            max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+            num_colors=config.NUM_COLORS,
+            embedding_dim=config.EMBEDDING_DIM,
+            hidden_dim=config.HIDDEN_DIM,
+            max_grid_size=config.MAX_GRID_SIZE,
+            bottleneck_type=config.BOTTLENECK_TYPE,
+            task_type='reconstruction',
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+            receiver_gets_input_puzzle=receiver_gets_input_puzzle,
+            use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
+            stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
+        ).to(device)
+        
+        # Load checkpoint if provided
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            state_dict = checkpoint.get('model_state_dict', checkpoint)
+            
+            # Handle selection task checkpoint mapping
+            if 'receiver_reconstructor.symbol_embed.weight' in state_dict or \
+               'decoder_reconstructor.fc_decode.weight' in state_dict:
+                new_state_dict = {}
+                for k, v in state_dict.items():
+                    if k.startswith('receiver_reconstructor.'):
+                        new_key = k.replace('receiver_reconstructor.', 'receiver.')
+                        new_state_dict[new_key] = v
+                    elif k.startswith('decoder_reconstructor.'):
+                        new_key = k.replace('decoder_reconstructor.', 'decoder.')
+                        new_state_dict[new_key] = v
+                    elif k.startswith('encoder.') or k.startswith('sender.'):
+                        new_state_dict[k] = v
+                
+                model.load_state_dict(new_state_dict, strict=False)
+            else:
+                # Standard checkpoint
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                elif 'encoder_state_dict' in checkpoint:
+                    encoder.load_state_dict(checkpoint['encoder_state_dict'])
+        
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        
+        best_loss = float('inf')
+        best_acc = 0.0
+        save_dir = 'puzzle_checkpoints'
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Training loop
+        for epoch in range(epochs):
+            model.train()
+            total_loss = 0
+            correct = 0
+            total = 0
+            
+            for input_grids, input_sizes, output_grids, output_sizes in train_loader:
+                input_grids = input_grids.to(device)
+                output_grids = output_grids.to(device)
+                
+                optimizer.zero_grad()
+                
+                # Forward pass
+                logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
+                
+                # Compute loss
+                batch_loss = 0
+                batch_correct = 0
+                batch_total = 0
+                
+                for i, logits in enumerate(logits_list):
+                    output_h, output_w = output_sizes[i]
+                    H, W = logits.shape[2], logits.shape[3]
+                    
+                    target_grid = output_grids[i:i+1, :H, :W]
+                    
+                    logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                    targets_flat = target_grid.reshape(-1)
+                    
+                    sample_loss = criterion(logits_flat, targets_flat)
+                    batch_loss += sample_loss
+                    
+                    # Compute accuracy
+                    pred = logits.argmax(dim=1).squeeze(0)
+                    target = target_grid.squeeze(0)
+                    sample_correct = (pred[:output_h, :output_w] == target[:output_h, :output_w]).sum().item()
+                    sample_total = output_h * output_w
+                    
+                    batch_correct += sample_correct
+                    batch_total += sample_total
+                
+                loss = batch_loss / len(logits_list)
+                loss.backward()
+                optimizer.step()
+                
+                total_loss += loss.item()
+                correct += batch_correct
+                total += batch_total
+            
+            avg_loss = total_loss / len(train_loader)
+            accuracy = 100.0 * correct / total if total > 0 else 0.0
+            
+            # Update state
+            finetuning_state['epoch'] = epoch + 1
+            finetuning_state['loss'] = avg_loss
+            finetuning_state['accuracy'] = accuracy
+            
+            # Send progress update
+            finetuning_progress_queue.put({
+                'status': 'progress',
+                'epoch': epoch + 1,
+                'total_epochs': epochs,
+                'loss': avg_loss,
+                'accuracy': accuracy
+            })
+            
+            # Save best model
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                best_acc = accuracy
+                save_path = os.path.join(save_dir, f'{puzzle_id}_best.pth')
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'train_loss': avg_loss,
+                    'train_acc': accuracy,
+                    'puzzle_id': puzzle_id,
+                    'bottleneck_type': config.BOTTLENECK_TYPE,
+                }, save_path)
+            
+            # Early stopping check
+            if accuracy >= early_stop_threshold:
+                checkpoint_file = os.path.join(save_dir, f'{puzzle_id}_best.pth')
+                finetuning_progress_queue.put({
+                    'status': 'early_stopped',
+                    'epoch': epoch + 1,
+                    'total_epochs': epochs,
+                    'loss': avg_loss,
+                    'accuracy': accuracy,
+                    'message': f'Early stopping: reached {accuracy:.2f}% accuracy',
+                    'puzzle_id': puzzle_id,
+                    'checkpoint_path': checkpoint_file,
+                    'train_loss': best_loss,
+                    'train_acc': best_acc
+                })
+                break
+        
+        # Send completion message (only if not early stopped)
+        checkpoint_file = os.path.join(save_dir, f'{puzzle_id}_best.pth')
+        finetuning_progress_queue.put({
+            'status': 'completed',
+            'puzzle_id': puzzle_id,
+            'checkpoint_path': checkpoint_file,
+            'train_loss': best_loss,
+            'train_acc': best_acc
+        })
+        
+        finetuning_state['running'] = False
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        finetuning_progress_queue.put({
+            'status': 'error',
+            'message': str(e)
+        })
+        finetuning_state['running'] = False
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -1835,13 +2394,19 @@ def stream():
 
 @app.route('/finetune_puzzle', methods=['POST'])
 def finetune_puzzle_route():
-    """Finetune a model on a specific puzzle."""
+    """Start background finetuning on a specific puzzle."""
+    global finetuning_thread, finetuning_state
+    
+    if finetuning_state['running']:
+        return jsonify({'error': 'Finetuning already in progress'}), 400
+    
     data = json.loads(request.data)
     puzzle_id = data.get('puzzle_id')
     checkpoint_path = data.get('checkpoint')
     epochs = data.get('epochs', 500)
     lr = data.get('lr', 1e-4)
     batch_size = data.get('batch_size', 8)
+    early_stop_threshold = data.get('early_stop_threshold', 99.0)
     dataset_version = data.get('dataset_version', 'V2')
     dataset_split = data.get('dataset_split', 'training')
     
@@ -1849,53 +2414,113 @@ def finetune_puzzle_route():
         return jsonify({'error': 'puzzle_id is required'}), 400
     
     try:
-        # Import here to avoid circular imports
-        import subprocess
+        # Clear the progress queue
+        while not finetuning_progress_queue.empty():
+            finetuning_progress_queue.get()
         
-        # Get data path
-        data_path = get_data_path(dataset_version, dataset_split)
-        
-        # Build finetune command
-        cmd_parts = [
-            'python', 'finetune_puzzle.py',
-            '--puzzle_id', puzzle_id,
-            '--data_path', data_path,
-            '--epochs', str(epochs),
-            '--lr', str(lr),
-            '--batch_size', str(batch_size),
-            '--save_dir', 'puzzle_checkpoints'
-        ]
-        
-        if checkpoint_path:
-            cmd_parts.extend(['--checkpoint', checkpoint_path])
-        
-        # Run finetuning
-        result = subprocess.run(
-            cmd_parts,
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
+        # Start finetuning in background thread
+        finetuning_thread = threading.Thread(
+            target=finetune_worker,
+            args=(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold)
         )
+        finetuning_thread.start()
         
-        if result.returncode != 0:
-            return jsonify({'error': f'Finetuning failed: {result.stderr}'}), 500
-        
-        # Load the saved checkpoint to get metrics
-        checkpoint_file = os.path.join('puzzle_checkpoints', f'{puzzle_id}_best.pth')
-        if os.path.exists(checkpoint_file):
-            checkpoint = torch.load(checkpoint_file, map_location='cpu')
-            return jsonify({
-                'status': 'success',
-                'puzzle_id': puzzle_id,
-                'checkpoint_path': checkpoint_file,
-                'train_loss': checkpoint.get('train_loss'),
-                'train_acc': checkpoint.get('train_acc')
-            })
-        else:
-            return jsonify({'error': 'Finetuning completed but checkpoint not found'}), 500
+        return jsonify({
+            'status': 'started',
+            'puzzle_id': puzzle_id,
+            'epochs': epochs,
+            'early_stop_threshold': early_stop_threshold
+        })
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/finetune_progress')
+def finetune_progress_stream():
+    """Stream finetuning progress updates."""
+    def generate():
+        while True:
+            try:
+                progress = finetuning_progress_queue.get(timeout=1.0)
+                yield f"data: {json.dumps(progress)}\n\n"
+                
+                # Stop streaming if completed or errored
+                if progress.get('status') in ['completed', 'error', 'early_stopped']:
+                    break
+            except queue.Empty:
+                # Send heartbeat
+                yield f"data: {json.dumps({'status': 'heartbeat', 'running': finetuning_state['running']})}\n\n"
+            
+            if not finetuning_state['running']:
+                time.sleep(0.5)
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/batch_test', methods=['POST'])
+def batch_test_route():
+    """Start batch testing on multiple puzzles."""
+    global batch_test_thread, batch_test_state
+    
+    if batch_test_state['running']:
+        return jsonify({'error': 'Batch test already in progress'}), 400
+    
+    data = json.loads(request.data)
+    puzzle_ids = data.get('puzzle_ids', [])
+    checkpoint_path = data.get('checkpoint')
+    epochs = data.get('epochs', 500)
+    lr = data.get('lr', 1e-4)
+    batch_size = data.get('batch_size', 8)
+    early_stop_threshold = data.get('early_stop_threshold', 99.0)
+    dataset_version = data.get('dataset_version', 'V2')
+    dataset_split = data.get('dataset_split', 'evaluation')
+    
+    if not puzzle_ids or len(puzzle_ids) == 0:
+        return jsonify({'error': 'puzzle_ids list is required'}), 400
+    
+    try:
+        # Clear the progress queue
+        while not batch_test_progress_queue.empty():
+            batch_test_progress_queue.get()
+        
+        # Start batch test in background thread
+        batch_test_thread = threading.Thread(
+            target=batch_test_worker,
+            args=(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold)
+        )
+        batch_test_thread.start()
+        
+        return jsonify({
+            'status': 'started',
+            'total_puzzles': len(puzzle_ids),
+            'puzzle_ids': puzzle_ids
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/batch_test_progress')
+def batch_test_progress_stream():
+    """Stream batch test progress updates."""
+    def generate():
+        while True:
+            try:
+                progress = batch_test_progress_queue.get(timeout=1.0)
+                yield f"data: {json.dumps(progress)}\n\n"
+                
+                # Stop streaming if completed or errored
+                if progress.get('status') in ['completed', 'error']:
+                    break
+            except queue.Empty:
+                # Send heartbeat
+                yield f"data: {json.dumps({'status': 'heartbeat', 'running': batch_test_state['running']})}\n\n"
+            
+            if not batch_test_state['running']:
+                time.sleep(0.5)
+    
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @app.route('/solve_puzzle', methods=['POST'])

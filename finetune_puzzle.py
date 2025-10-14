@@ -260,8 +260,11 @@ def main():
     print(f'Training examples: {len(train_dataset)}')
     print(f'Epochs: {args.epochs}')
     print(f'Learning rate: {args.lr}')
+    print(f'Early stopping: Will stop if accuracy reaches 99%')
     
     best_loss = float('inf')
+    best_acc = 0.0
+    early_stop_threshold = 99.0  # Stop if accuracy reaches 99%
     
     for epoch in range(args.epochs):
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device)
@@ -276,6 +279,7 @@ def main():
         # Save best model
         if train_loss < best_loss:
             best_loss = train_loss
+            best_acc = train_acc
             save_path = os.path.join(args.save_dir, f'{args.puzzle_id}_best.pth')
             torch.save({
                 'epoch': epoch,
@@ -288,7 +292,13 @@ def main():
             }, save_path)
             
             if (epoch + 1) % 50 == 0:
-                print(f'  ✓ Saved best model (loss: {best_loss:.4f})')
+                print(f'  ✓ Saved best model (loss: {best_loss:.4f}, acc: {best_acc:.2f}%)')
+        
+        # Early stopping check
+        if train_acc >= early_stop_threshold:
+            print(f'\n✓ Early stopping triggered! Reached {train_acc:.2f}% accuracy (threshold: {early_stop_threshold}%)')
+            print(f'  Stopped at epoch {epoch+1}/{args.epochs}')
+            break
     
     # Save final model
     final_path = os.path.join(args.save_dir, f'{args.puzzle_id}_final.pth')

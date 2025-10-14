@@ -125,12 +125,12 @@
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
         }
         
-        .btn-finetune {
+        .btn-finetune-solve {
             background: #10b981;
             color: white;
         }
         
-        .btn-finetune:hover:not(:disabled) {
+        .btn-finetune-solve:hover:not(:disabled) {
             background: #059669;
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
@@ -150,6 +150,38 @@
         .status-message {
             font-size: 14px;
             color: #1e40af;
+        }
+        
+        .progress-container {
+            margin-top: 15px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e5e7eb;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        
+        .progress-text {
+            margin-top: 8px;
+            font-size: 13px;
+            color: #4b5563;
+            text-align: center;
         }
         
         .loading-spinner {
@@ -315,6 +347,104 @@
             display: none;
         }
         
+        .batch-results-section {
+            padding: 30px;
+            background: #f8f9fa;
+        }
+        
+        .batch-summary {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .batch-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .batch-summary-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .batch-summary-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 5px;
+        }
+        
+        .batch-summary-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1f2937;
+        }
+        
+        .batch-results-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .batch-results-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .batch-results-table th {
+            background: #667eea;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 13px;
+        }
+        
+        .batch-results-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .batch-results-table tr:hover {
+            background: #f9fafb;
+        }
+        
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .status-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        
+        .status-partial {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        
+        .status-failed {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .status-error {
+            background: #fecaca;
+            color: #7f1d1d;
+        }
+        
         .checkpoint-list {
             max-height: 200px;
             overflow-y: auto;
@@ -387,13 +517,75 @@
             </div>
             
             <div class="control-section">
+                <label class="control-label">Finetuning Parameters</label>
+                <div class="input-group">
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap; width: 100%;">
+                        <div style="flex: 1; min-width: 140px;">
+                            <label style="font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px;" 
+                                   title="Maximum number of training epochs">
+                                📊 Epochs
+                            </label>
+                            <input type="number" id="finetuneEpochs" value="500" min="1" max="10000" 
+                                   placeholder="500"
+                                   title="Number of training iterations (default: 500)"
+                                   style="width: 100%; padding: 8px; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div style="flex: 1; min-width: 140px;">
+                            <label style="font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px;"
+                                   title="Learning rate for optimization">
+                                ⚡ Learning Rate
+                            </label>
+                            <input type="number" id="finetuneLR" value="0.0001" step="0.00001" min="0.00001" max="0.1"
+                                   placeholder="0.0001"
+                                   title="How fast the model learns (default: 0.0001)"
+                                   style="width: 100%; padding: 8px; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div style="flex: 1; min-width: 140px;">
+                            <label style="font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px;"
+                                   title="Number of training examples per batch">
+                                📦 Batch Size
+                            </label>
+                            <input type="number" id="finetuneBatchSize" value="8" min="1" max="64"
+                                   placeholder="8"
+                                   title="Number of examples processed together (default: 8)"
+                                   style="width: 100%; padding: 8px; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        <div style="flex: 1; min-width: 140px;">
+                            <label style="font-size: 12px; color: #6b7280; display: block; margin-bottom: 4px;"
+                                   title="Stop training when accuracy reaches this threshold">
+                                🎯 Early Stop (%)
+                            </label>
+                            <input type="number" id="finetuneEarlyStop" value="99.0" step="0.1" min="90" max="100"
+                                   placeholder="99.0"
+                                   title="Stops training when this accuracy % is reached (default: 99%)"
+                                   style="width: 100%; padding: 8px; border: 2px solid #cbd5e0; border-radius: 6px; font-size: 14px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="control-section">
                 <label class="control-label">Actions</label>
                 <div class="input-group">
-                    <button class="btn-finetune" id="finetuneBtn" onclick="finetunePuzzle()" disabled>
-                        Finetune on This Puzzle
+                    <button class="btn-finetune-solve" id="finetuneSolveBtn" onclick="finetuneAndSolvePuzzle()" disabled>
+                        Finetune + Solve
                     </button>
                     <button class="btn-primary" id="solveBtn" onclick="solvePuzzle()" disabled>
-                        Solve Puzzle
+                        Just Solve
+                    </button>
+                </div>
+            </div>
+            
+            <div class="control-section" style="border-top: 3px solid #e9ecef; padding-top: 25px; margin-top: 25px;">
+                <label class="control-label">🚀 Batch Testing</label>
+                <div style="margin-bottom: 15px;">
+                    <p style="font-size: 13px; color: #6b7280; margin: 0;">
+                        Automatically finetune and solve all puzzles in the selected dataset. Results will be displayed in a summary table.
+                    </p>
+                </div>
+                <div class="input-group">
+                    <button class="btn-finetune-solve" id="batchTestBtn" onclick="startBatchTest()" style="flex: 1;">
+                        📊 Run Batch Test on All Puzzles
                     </button>
                 </div>
             </div>
@@ -401,6 +593,14 @@
         
         <div class="status-section" id="statusSection" style="display: none;">
             <div class="status-message" id="statusMessage"></div>
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%;">
+                        <span id="progressPercent">0%</span>
+                    </div>
+                </div>
+                <div class="progress-text" id="progressText"></div>
+            </div>
         </div>
         
         <div class="results-section" id="resultsSection" style="display: none;">
@@ -409,6 +609,42 @@
             <div class="puzzle-info" id="puzzleInfo"></div>
             
             <div class="test-examples" id="testExamples"></div>
+        </div>
+        
+        <div class="batch-results-section" id="batchResultsSection" style="display: none;">
+            <h2 class="section-title">Batch Test Results</h2>
+            
+            <div class="batch-summary" id="batchSummary"></div>
+            
+            <div class="batch-results-table" id="batchResultsTable"></div>
+        </div>
+        
+        <div class="results-section" id="batchCurrentPuzzle" style="display: none;">
+            <h2 class="section-title">Current Puzzle Preview</h2>
+            
+            <div class="puzzle-info" id="currentPuzzleInfo"></div>
+            
+            <div class="test-examples">
+                <div class="test-example">
+                    <div class="example-header">
+                        <span class="example-title">Last Test Example</span>
+                    </div>
+                    <div class="grids-display">
+                        <div class="grid-container">
+                            <div class="grid-label">INPUT</div>
+                            <div id="batch-current-input" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-container">
+                            <div class="grid-label">TARGET OUTPUT</div>
+                            <div id="batch-current-target" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-container">
+                            <div class="grid-label">PREDICTED OUTPUT</div>
+                            <div id="batch-current-predicted" style="text-align: center;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -420,6 +656,9 @@
         
         let currentPuzzleId = null;
         let currentResults = null;
+        let finetuningEventSource = null;
+        let batchTestEventSource = null;
+        let batchResults = [];
         
         // Load checkpoints and puzzles on page load
         window.addEventListener('load', () => {
@@ -510,6 +749,26 @@
         
         function hideStatus() {
             document.getElementById('statusSection').style.display = 'none';
+            hideProgress();
+        }
+        
+        function showProgress() {
+            document.getElementById('progressContainer').style.display = 'block';
+        }
+        
+        function hideProgress() {
+            document.getElementById('progressContainer').style.display = 'none';
+        }
+        
+        function updateProgress(epoch, totalEpochs, loss, accuracy) {
+            const percent = (epoch / totalEpochs) * 100;
+            const progressFill = document.getElementById('progressFill');
+            const progressPercent = document.getElementById('progressPercent');
+            const progressText = document.getElementById('progressText');
+            
+            progressFill.style.width = `${percent}%`;
+            progressPercent.textContent = `${Math.round(percent)}%`;
+            progressText.textContent = `Epoch ${epoch}/${totalEpochs} - Loss: ${loss.toFixed(4)}, Accuracy: ${accuracy.toFixed(2)}%`;
         }
         
         function loadPuzzle() {
@@ -523,7 +782,7 @@
             currentPuzzleId = puzzleId;
             
             // Enable buttons
-            document.getElementById('finetuneBtn').disabled = false;
+            document.getElementById('finetuneSolveBtn').disabled = false;
             document.getElementById('solveBtn').disabled = false;
             
             // Clear previous results
@@ -532,7 +791,7 @@
             showStatus(`Puzzle ${puzzleId} loaded. Select a checkpoint and action.`);
         }
         
-        function finetunePuzzle() {
+        function finetuneAndSolvePuzzle() {
             if (!currentPuzzleId) {
                 alert('Please load a puzzle first');
                 return;
@@ -540,19 +799,27 @@
             
             const checkpoint = document.getElementById('checkpointSelect').value;
             
-            if (!confirm(`Finetune on puzzle ${currentPuzzleId}?\n\nThis will train a model specifically for this puzzle and may take several minutes.`)) {
+            if (!confirm(`Finetune and solve puzzle ${currentPuzzleId}?\n\nThis will train a model specifically for this puzzle and then solve it. This may take several minutes.`)) {
                 return;
             }
             
-            showStatus(`Finetuning on puzzle ${currentPuzzleId}...`, true);
+            showStatus(`Step 1/2: Starting finetuning on puzzle ${currentPuzzleId}...`, true);
+            showProgress();
             
-            // Disable buttons during finetuning
-            document.getElementById('finetuneBtn').disabled = true;
+            // Disable buttons during process
+            document.getElementById('finetuneSolveBtn').disabled = true;
             document.getElementById('solveBtn').disabled = true;
             
             const datasetVersion = document.getElementById('datasetVersion').value;
             const datasetSplit = document.getElementById('datasetSplit').value;
             
+            // Get finetuning parameters from inputs
+            const epochs = parseInt(document.getElementById('finetuneEpochs').value) || 500;
+            const lr = parseFloat(document.getElementById('finetuneLR').value) || 1e-4;
+            const batchSize = parseInt(document.getElementById('finetuneBatchSize').value) || 8;
+            const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+            
+            // Step 1: Start finetuning
             fetch('/finetune_puzzle', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -561,29 +828,117 @@
                     checkpoint: checkpoint || null,
                     dataset_version: datasetVersion,
                     dataset_split: datasetSplit,
-                    epochs: 500,
-                    lr: 1e-4,
-                    batch_size: 8
+                    epochs: epochs,
+                    lr: lr,
+                    batch_size: batchSize,
+                    early_stop_threshold: earlyStopThreshold
                 })
             })
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    showStatus(`Error: ${data.error}`);
-                    document.getElementById('finetuneBtn').disabled = false;
+                    showStatus(`Error starting finetuning: ${data.error}`);
+                    document.getElementById('finetuneSolveBtn').disabled = false;
+                    document.getElementById('solveBtn').disabled = false;
+                    hideProgress();
+                    return;
+                }
+                
+                // Connect to progress stream
+                if (finetuningEventSource) {
+                    finetuningEventSource.close();
+                }
+                
+                finetuningEventSource = new EventSource('/finetune_progress');
+                
+                finetuningEventSource.onmessage = function(event) {
+                    const progress = JSON.parse(event.data);
+                    
+                    if (progress.status === 'started') {
+                        const earlyStopInfo = progress.early_stop_threshold ? ` (early stop at ${progress.early_stop_threshold}%)` : '';
+                        showStatus(`Finetuning started: ${progress.total_epochs} epochs${earlyStopInfo}`, true);
+                    } else if (progress.status === 'progress') {
+                        const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+                        const statusText = progress.accuracy >= earlyStopThreshold - 1 ? 
+                            `Finetuning in progress... (approaching ${earlyStopThreshold}% target)` : 
+                            `Finetuning in progress...`;
+                        showStatus(statusText, true);
+                        updateProgress(progress.epoch, progress.total_epochs, progress.loss, progress.accuracy);
+                    } else if (progress.status === 'early_stopped') {
+                        showStatus(`✓ ${progress.message} - Loss: ${progress.train_loss.toFixed(4)}, Accuracy: ${progress.train_acc.toFixed(2)}%`, false);
+                        updateProgress(progress.epoch, progress.total_epochs, progress.loss, progress.accuracy);
+                        // Wait a bit then proceed to solving
+                        setTimeout(() => proceedToSolving(progress), 1000);
+                    } else if (progress.status === 'completed') {
+                        showStatus(`✓ Finetuning completed! Loss: ${progress.train_loss.toFixed(4)}, Accuracy: ${progress.train_acc.toFixed(2)}%`, false);
+                        // Proceed to solving
+                        setTimeout(() => proceedToSolving(progress), 1000);
+                    } else if (progress.status === 'error') {
+                        showStatus(`Error during finetuning: ${progress.message}`);
+                        document.getElementById('finetuneSolveBtn').disabled = false;
+                        document.getElementById('solveBtn').disabled = false;
+                        hideProgress();
+                        finetuningEventSource.close();
+                    }
+                };
+                
+                finetuningEventSource.onerror = function(error) {
+                    console.error('EventSource error:', error);
+                    finetuningEventSource.close();
+                };
+            })
+            .catch(error => {
+                showStatus(`Error starting finetuning: ${error.message}`);
+                document.getElementById('finetuneSolveBtn').disabled = false;
+                document.getElementById('solveBtn').disabled = false;
+                hideProgress();
+            });
+        }
+        
+        function proceedToSolving(finetuneData) {
+            // Close the event source
+            if (finetuningEventSource) {
+                finetuningEventSource.close();
+                finetuningEventSource = null;
+            }
+            
+            showStatus(`Step 2/2: Solving puzzle...`, true);
+            hideProgress();
+            
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
+            const finetunedCheckpoint = finetuneData.checkpoint_path;
+            
+            fetch('/solve_puzzle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    puzzle_id: currentPuzzleId,
+                    checkpoint: finetunedCheckpoint,
+                    dataset_version: datasetVersion,
+                    dataset_split: datasetSplit
+                })
+            })
+            .then(response => response.json())
+            .then(solveData => {
+                if (solveData.error) {
+                    showStatus(`Error during solving: ${solveData.error}`);
+                    document.getElementById('finetuneSolveBtn').disabled = false;
                     document.getElementById('solveBtn').disabled = false;
                 } else {
-                    showStatus(`✓ Finetuning completed! Loss: ${data.train_loss?.toFixed(4) || 'N/A'}, Accuracy: ${data.train_acc?.toFixed(2) || 'N/A'}%`);
-                    document.getElementById('finetuneBtn').disabled = false;
+                    currentResults = solveData;
+                    displayResults(solveData);
+                    hideStatus();
+                    document.getElementById('finetuneSolveBtn').disabled = false;
                     document.getElementById('solveBtn').disabled = false;
                     
-                    // Refresh checkpoints to show the new one
+                    // Refresh checkpoints to show the new finetuned model
                     refreshCheckpoints();
                 }
             })
             .catch(error => {
-                showStatus(`Error during finetuning: ${error.message}`);
-                document.getElementById('finetuneBtn').disabled = false;
+                showStatus(`Error during solving: ${error.message}`);
+                document.getElementById('finetuneSolveBtn').disabled = false;
                 document.getElementById('solveBtn').disabled = false;
             });
         }
@@ -753,6 +1108,348 @@
             
             // Scroll to results
             resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function startBatchTest() {
+            const datasetVersion = document.getElementById('datasetVersion').value;
+            const datasetSplit = document.getElementById('datasetSplit').value;
+            const checkpoint = document.getElementById('checkpointSelect').value;
+            
+            // Get finetuning parameters
+            const epochs = parseInt(document.getElementById('finetuneEpochs').value) || 500;
+            const lr = parseFloat(document.getElementById('finetuneLR').value) || 1e-4;
+            const batchSize = parseInt(document.getElementById('finetuneBatchSize').value) || 8;
+            const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+            
+            if (!confirm(`Run batch test on ALL puzzles in ${datasetVersion}/${datasetSplit}?\n\nThis will finetune and solve each puzzle. This may take a very long time.`)) {
+                return;
+            }
+            
+            // First, fetch all puzzle IDs
+            showStatus('Loading puzzle list...', true);
+            
+            fetch(`/list_puzzles?dataset_version=${datasetVersion}&dataset_split=${datasetSplit}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showStatus(`Error: ${data.error}`);
+                        return;
+                    }
+                    
+                    const puzzleIds = data.puzzle_ids;
+                    
+                    if (!puzzleIds || puzzleIds.length === 0) {
+                        showStatus('No puzzles found in dataset');
+                        return;
+                    }
+                    
+                    // Hide single puzzle results
+                    document.getElementById('resultsSection').style.display = 'none';
+                    
+                    // Clear previous batch results
+                    batchResults = [];
+                    document.getElementById('batchResultsSection').style.display = 'none';
+                    document.getElementById('batchCurrentPuzzle').style.display = 'none';
+                    
+                    // Disable buttons
+                    document.getElementById('batchTestBtn').disabled = true;
+                    document.getElementById('finetuneSolveBtn').disabled = true;
+                    document.getElementById('solveBtn').disabled = true;
+                    
+                    showStatus(`Starting batch test on ${puzzleIds.length} puzzles...`, true);
+                    showProgress();
+                    
+                    // Start batch test
+                    fetch('/batch_test', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            puzzle_ids: puzzleIds,
+                            checkpoint: checkpoint || null,
+                            dataset_version: datasetVersion,
+                            dataset_split: datasetSplit,
+                            epochs: epochs,
+                            lr: lr,
+                            batch_size: batchSize,
+                            early_stop_threshold: earlyStopThreshold
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            showStatus(`Error starting batch test: ${data.error}`);
+                            document.getElementById('batchTestBtn').disabled = false;
+                            document.getElementById('finetuneSolveBtn').disabled = false;
+                            document.getElementById('solveBtn').disabled = false;
+                            hideProgress();
+                            return;
+                        }
+                        
+                        // Connect to progress stream
+                        if (batchTestEventSource) {
+                            batchTestEventSource.close();
+                        }
+                        
+                        batchTestEventSource = new EventSource('/batch_test_progress');
+                        
+                        batchTestEventSource.onmessage = function(event) {
+                            const progress = JSON.parse(event.data);
+                            
+                            if (progress.status === 'started') {
+                                showStatus(`Batch test started: ${progress.total_puzzles} puzzles`, true);
+                                // Show current puzzle section
+                                document.getElementById('batchCurrentPuzzle').style.display = 'block';
+                            } else if (progress.status === 'puzzle_started') {
+                                showStatus(`Starting puzzle ${progress.puzzle_index}/${progress.total_puzzles}: ${progress.puzzle_id}`, true);
+                                updateProgress(progress.puzzle_index, progress.total_puzzles, 0, 0);
+                                // Update current puzzle info
+                                updateCurrentPuzzleInfo(progress.puzzle_id, progress.puzzle_index, progress.total_puzzles);
+                            } else if (progress.status === 'finetuning') {
+                                showStatus(`[${progress.puzzle_index}/${progress.total_puzzles}] Finetuning ${progress.puzzle_id}...`, true);
+                            } else if (progress.status === 'finetune_progress') {
+                                // Real-time finetuning progress
+                                showStatus(`[${progress.puzzle_index}/${progress.total_puzzles}] Finetuning ${progress.puzzle_id} - Epoch ${progress.epoch}/${progress.total_epochs}: Loss ${progress.loss.toFixed(4)}, Acc ${progress.accuracy.toFixed(2)}%`, true);
+                                // Update puzzle info with current training stats
+                                updateCurrentPuzzleInfo(progress.puzzle_id, progress.puzzle_index, progress.total_puzzles, 
+                                                       progress.epoch, progress.total_epochs, progress.loss, progress.accuracy);
+                            } else if (progress.status === 'solving') {
+                                showStatus(`[${progress.puzzle_index}/${progress.total_puzzles}] Solving ${progress.puzzle_id}... (Finetune: ${progress.finetune_acc.toFixed(1)}%)`, true);
+                            } else if (progress.status === 'puzzle_completed') {
+                                batchResults.push(progress.result);
+                                const percent = (progress.puzzle_index / progress.total_puzzles) * 100;
+                                document.getElementById('progressFill').style.width = `${percent}%`;
+                                document.getElementById('progressPercent').textContent = `${Math.round(percent)}%`;
+                                document.getElementById('progressText').textContent = `Completed ${progress.puzzle_index}/${progress.total_puzzles} puzzles`;
+                                
+                                showStatus(`[${progress.puzzle_index}/${progress.total_puzzles}] ✓ Completed ${progress.puzzle_id} (${progress.result.num_correct}/${progress.result.num_test_examples} correct)`, false);
+                                
+                                // Display the last example grids
+                                if (progress.last_example) {
+                                    displayBatchCurrentPuzzle(progress.puzzle_id, progress.result, progress.last_example);
+                                }
+                            } else if (progress.status === 'puzzle_error') {
+                                batchResults.push({puzzle_id: progress.puzzle_id, error: progress.error, success: false});
+                                showStatus(`[${progress.puzzle_index}/${progress.total_puzzles}] ✗ Error on ${progress.puzzle_id}: ${progress.error}`, false);
+                            } else if (progress.status === 'completed') {
+                                showStatus(`✓ Batch test completed! Processed ${progress.total_puzzles} puzzles`, false);
+                                hideProgress();
+                                displayBatchResults(progress.results);
+                                batchTestEventSource.close();
+                                
+                                // Re-enable buttons
+                                document.getElementById('batchTestBtn').disabled = false;
+                                document.getElementById('finetuneSolveBtn').disabled = false;
+                                document.getElementById('solveBtn').disabled = false;
+                            } else if (progress.status === 'error') {
+                                showStatus(`Error during batch test: ${progress.message}`);
+                                hideProgress();
+                                batchTestEventSource.close();
+                                
+                                // Re-enable buttons
+                                document.getElementById('batchTestBtn').disabled = false;
+                                document.getElementById('finetuneSolveBtn').disabled = false;
+                                document.getElementById('solveBtn').disabled = false;
+                            }
+                        };
+                        
+                        batchTestEventSource.onerror = function(error) {
+                            console.error('Batch test EventSource error:', error);
+                            batchTestEventSource.close();
+                        };
+                    })
+                    .catch(error => {
+                        showStatus(`Error starting batch test: ${error.message}`);
+                        document.getElementById('batchTestBtn').disabled = false;
+                        document.getElementById('finetuneSolveBtn').disabled = false;
+                        document.getElementById('solveBtn').disabled = false;
+                        hideProgress();
+                    });
+                })
+                .catch(error => {
+                    showStatus(`Error loading puzzles: ${error.message}`);
+                });
+        }
+        
+        function displayBatchResults(results) {
+            const batchResultsSection = document.getElementById('batchResultsSection');
+            const batchSummary = document.getElementById('batchSummary');
+            const batchResultsTable = document.getElementById('batchResultsTable');
+            
+            batchResultsSection.style.display = 'block';
+            
+            // Calculate summary statistics
+            const totalPuzzles = results.length;
+            const successfulPuzzles = results.filter(r => r.success).length;
+            const failedPuzzles = totalPuzzles - successfulPuzzles;
+            const totalCorrect = results.reduce((sum, r) => sum + (r.num_correct || 0), 0);
+            const totalTests = results.reduce((sum, r) => sum + (r.num_test_examples || 0), 0);
+            const overallAccuracy = totalTests > 0 ? (totalCorrect / totalTests * 100) : 0;
+            const avgPixelAccuracy = results.filter(r => r.success).reduce((sum, r) => sum + r.avg_pixel_accuracy, 0) / successfulPuzzles || 0;
+            
+            // Display summary
+            batchSummary.innerHTML = `
+                <h3 style="margin-bottom: 15px; color: #1f2937;">Summary Statistics</h3>
+                <div class="batch-summary-grid">
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Total Puzzles</div>
+                        <div class="batch-summary-value">${totalPuzzles}</div>
+                    </div>
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Successful</div>
+                        <div class="batch-summary-value" style="color: #10b981;">${successfulPuzzles}</div>
+                    </div>
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Failed/Errors</div>
+                        <div class="batch-summary-value" style="color: #ef4444;">${failedPuzzles}</div>
+                    </div>
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Overall Accuracy</div>
+                        <div class="batch-summary-value" style="color: #667eea;">${overallAccuracy.toFixed(1)}%</div>
+                    </div>
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Avg Pixel Accuracy</div>
+                        <div class="batch-summary-value">${avgPixelAccuracy.toFixed(1)}%</div>
+                    </div>
+                    <div class="batch-summary-item">
+                        <div class="batch-summary-label">Exact Matches</div>
+                        <div class="batch-summary-value">${totalCorrect}/${totalTests}</div>
+                    </div>
+                </div>
+            `;
+            
+            // Display results table
+            let tableHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Puzzle ID</th>
+                            <th>Status</th>
+                            <th>Finetune Acc</th>
+                            <th>Test Examples</th>
+                            <th>Exact Matches</th>
+                            <th>Pixel Accuracy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            results.forEach((result, idx) => {
+                if (result.success) {
+                    const statusClass = result.num_correct === result.num_test_examples ? 'status-success' : 
+                                       result.num_correct > 0 ? 'status-partial' : 'status-failed';
+                    const statusText = result.num_correct === result.num_test_examples ? '✓ Perfect' : 
+                                      result.num_correct > 0 ? '◐ Partial' : '✗ Failed';
+                    
+                    tableHTML += `
+                        <tr>
+                            <td>${idx + 1}</td>
+                            <td><strong>${result.puzzle_id}</strong></td>
+                            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                            <td>${result.finetune_acc.toFixed(1)}%</td>
+                            <td>${result.num_test_examples}</td>
+                            <td>${result.num_correct}/${result.num_test_examples}</td>
+                            <td>${result.avg_pixel_accuracy.toFixed(1)}%</td>
+                        </tr>
+                    `;
+                } else {
+                    tableHTML += `
+                        <tr>
+                            <td>${idx + 1}</td>
+                            <td><strong>${result.puzzle_id}</strong></td>
+                            <td><span class="status-badge status-error">⚠ Error</span></td>
+                            <td colspan="4" style="color: #991b1b;">${result.error}</td>
+                        </tr>
+                    `;
+                }
+            });
+            
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+            
+            batchResultsTable.innerHTML = tableHTML;
+            
+            // Scroll to results
+            batchResultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function updateCurrentPuzzleInfo(puzzleId, puzzleIndex, totalPuzzles, epoch, totalEpochs, loss, accuracy) {
+            const currentPuzzleInfo = document.getElementById('currentPuzzleInfo');
+            
+            let epochInfo = '';
+            if (epoch !== undefined && totalEpochs !== undefined) {
+                epochInfo = `
+                    <div class="info-item">
+                        <div class="info-label">Finetuning Progress</div>
+                        <div class="info-value">${epoch}/${totalEpochs}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Current Loss</div>
+                        <div class="info-value">${loss.toFixed(4)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Current Accuracy</div>
+                        <div class="info-value" style="color: ${accuracy >= 95 ? '#10b981' : '#667eea'}">${accuracy.toFixed(2)}%</div>
+                    </div>
+                `;
+            }
+            
+            currentPuzzleInfo.innerHTML = `
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Current Puzzle</div>
+                        <div class="info-value">${puzzleId}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Progress</div>
+                        <div class="info-value">${puzzleIndex}/${totalPuzzles}</div>
+                    </div>
+                    ${epochInfo}
+                </div>
+            `;
+        }
+        
+        function displayBatchCurrentPuzzle(puzzleId, result, lastExample) {
+            const currentPuzzleInfo = document.getElementById('currentPuzzleInfo');
+            
+            // Update info with final results
+            const accuracyColor = lastExample.exact_match ? '#10b981' : '#ef4444';
+            const statusText = lastExample.exact_match ? '✓ Exact Match' : '✗ Mismatch';
+            
+            currentPuzzleInfo.innerHTML = `
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">Puzzle ID</div>
+                        <div class="info-value">${puzzleId}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Status</div>
+                        <div class="info-value" style="color: ${accuracyColor}">${statusText}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Finetune Accuracy</div>
+                        <div class="info-value">${result.finetune_acc.toFixed(2)}%</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Test Pixel Accuracy</div>
+                        <div class="info-value">${lastExample.pixel_accuracy.toFixed(2)}%</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Total Correct</div>
+                        <div class="info-value">${result.num_correct}/${result.num_test_examples}</div>
+                    </div>
+                </div>
+            `;
+            
+            // Render grids
+            renderGrid(lastExample.input, 'batch-current-input');
+            renderGrid(lastExample.target, 'batch-current-target');
+            renderGrid(lastExample.predicted, 'batch-current-predicted');
+            
+            // Scroll to current puzzle
+            document.getElementById('batchCurrentPuzzle').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     </script>
 </body>
