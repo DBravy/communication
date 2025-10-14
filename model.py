@@ -280,16 +280,18 @@ class SenderAgent(nn.Module):
 class ReceiverAgent(nn.Module):
     """
     FIXED: Receiver that can accept soft message representations.
-    Can optionally also receive the input puzzle to aid reconstruction.
+    Can optionally also receive the encoder's latent representation (shared common ground).
     Supports variable-length messages via masking.
     """
-    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30, receives_input_puzzle=False, use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
+    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30, 
+                 receives_input_encoding=False, encoder_latent_dim=None,
+                 use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_colors = num_colors
         self.hidden_dim = hidden_dim
         self.max_grid_size = max_grid_size
-        self.receives_input_puzzle = receives_input_puzzle
+        self.receives_input_encoding = receives_input_encoding
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id if use_stop_token else None
         self.lstm_hidden_dim = hidden_dim if lstm_hidden_dim is None else lstm_hidden_dim
@@ -302,23 +304,16 @@ class ReceiverAgent(nn.Module):
         
         self.lstm = nn.LSTM(hidden_dim, self.lstm_hidden_dim, batch_first=True)
         
-        # If receiver gets input puzzle, add an encoder for it
-        if receives_input_puzzle:
-            # Simple 2-layer CNN to encode input puzzle
-            self.input_puzzle_conv1 = nn.Conv2d(num_colors, hidden_dim // 2, kernel_size=3, padding=1)
-            self.input_puzzle_bn1 = nn.BatchNorm2d(hidden_dim // 2)
-            self.input_puzzle_conv2 = nn.Conv2d(hidden_dim // 2, hidden_dim, kernel_size=3, padding=1)
-            self.input_puzzle_bn2 = nn.BatchNorm2d(hidden_dim)
-            self.input_puzzle_pool = nn.AdaptiveAvgPool2d((4, 4))
-            self.input_puzzle_fc = nn.Linear(hidden_dim * 4 * 4, hidden_dim)
-            
-            # Combine message and input puzzle representations
-            self.combine_fc = nn.Linear(self.lstm_hidden_dim + hidden_dim, hidden_dim)
+        # If receiver gets encoder's latent, combine it with message
+        if receives_input_encoding:
+            assert encoder_latent_dim is not None, "Must provide encoder_latent_dim when receives_input_encoding=True"
+            self.combine_fc = nn.Linear(self.lstm_hidden_dim + encoder_latent_dim, hidden_dim)
         
         self.relu = nn.ReLU()
         
         # Map from message representation (from LSTM hidden) into decoder input
-        self.fc_decode = nn.Linear(self.lstm_hidden_dim, hidden_dim * 4 * 4)
+        self.fc_decode = nn.Linear(self.lstm_hidden_dim if not receives_input_encoding else hidden_dim, 
+                                   hidden_dim * 4 * 4)
         
         self.deconv1 = nn.ConvTranspose2d(hidden_dim, hidden_dim,
                                          kernel_size=4, stride=2, padding=1)
@@ -337,21 +332,18 @@ class ReceiverAgent(nn.Module):
         self.bn_out1 = nn.BatchNorm2d(hidden_dim)
         
         self.conv_out = nn.Conv2d(hidden_dim, num_colors, kernel_size=1)
-        
-        self.relu = nn.ReLU()
     
-    def forward(self, message, target_size, soft_message=None, input_puzzle=None, input_size=None, message_lengths=None):
+    def forward(self, message, target_size, soft_message=None, input_encoding=None, message_lengths=None):
         """
         FIXED: Accepts soft_message for gradient flow during training.
-        Can also accept input_puzzle to aid reconstruction.
+        Can also accept input_encoding (encoder's latent) for shared common ground.
         Supports variable-length messages via masking.
         
         Args:
             message: Discrete message symbols [batch, max_length]
             target_size: (height, width) of target grid to reconstruct
             soft_message: Soft message representation [batch, max_length, effective_vocab_size]
-            input_puzzle: Optional input puzzle [batch, H, W] (requires receives_input_puzzle=True)
-            input_size: Optional (height, width) of input puzzle
+            input_encoding: Optional encoder's latent [batch, encoder_latent_dim] (shared common ground)
             message_lengths: Optional [batch] tensor of actual message lengths (for masking)
         """
         if soft_message is not None and self.training:
@@ -373,31 +365,10 @@ class ReceiverAgent(nn.Module):
         lstm_out, (h, c) = self.lstm(embedded)
         message_repr = h.squeeze(0)
         
-        # If receiver gets input puzzle, encode it and combine with message
-        if self.receives_input_puzzle and input_puzzle is not None:
-            # One-hot encode input puzzle
-            input_one_hot = F.one_hot(input_puzzle.long(), num_classes=self.num_colors).float()
-            input_one_hot = input_one_hot.permute(0, 3, 1, 2)  # [batch, num_colors, H, W]
-            
-            # Encode input puzzle through CNN
-            x = self.relu(self.input_puzzle_bn1(self.input_puzzle_conv1(input_one_hot)))
-            x = self.relu(self.input_puzzle_bn2(self.input_puzzle_conv2(x)))
-            
-            # Pool to fixed size
-            if input_size is not None:
-                # Only pool the actual content area
-                h_in, w_in = input_size
-                content = x[:, :, :h_in, :w_in]
-                x = self.input_puzzle_pool(content)
-            else:
-                x = self.input_puzzle_pool(x)
-            
-            # Flatten and project
-            x = x.reshape(x.shape[0], -1)
-            input_puzzle_repr = self.relu(self.input_puzzle_fc(x))
-            
-            # Combine message and input puzzle representations
-            combined = torch.cat([message_repr, input_puzzle_repr], dim=1)
+        # If receiver gets encoder's latent, combine it with message representation
+        if self.receives_input_encoding and input_encoding is not None:
+            # Combine message and encoder's latent (shared common ground)
+            combined = torch.cat([message_repr, input_encoding], dim=1)
             message_repr = self.relu(self.combine_fc(combined))
         
         H, W = target_size
@@ -418,7 +389,6 @@ class ReceiverAgent(nn.Module):
                                   mode='bilinear', align_corners=False)
         
         return logits
-
 
 class ReceiverPuzzleClassifier(nn.Module):
     """Receiver for puzzle classification task. Supports variable-length messages."""
@@ -701,9 +671,10 @@ class ARCAutoencoder(nn.Module):
             self.sender = SenderAgent(encoder, vocab_size, max_length, use_stop_token=use_stop_token, stop_token_id=stop_token_id, lstm_hidden_dim=self.lstm_hidden_dim)
             if task_type == 'reconstruction':
                 self.receiver = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size, 
-                                             receives_input_puzzle=receiver_gets_input_puzzle,
-                                             use_stop_token=use_stop_token, stop_token_id=stop_token_id,
-                                             lstm_hidden_dim=self.lstm_hidden_dim)
+                                            receives_input_encoding=receiver_gets_input_puzzle,
+                                            encoder_latent_dim=encoder.latent_dim,
+                                            use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                            lstm_hidden_dim=self.lstm_hidden_dim)
             elif task_type == 'selection':
                 # In selection mode, create BOTH receivers
                 self.receiver = ReceiverSelector(vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers,
@@ -711,9 +682,10 @@ class ARCAutoencoder(nn.Module):
                                                 lstm_hidden_dim=self.lstm_hidden_dim)
                 # Add reconstruction receiver for background training
                 self.receiver_reconstructor = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size,
-                                                           receives_input_puzzle=receiver_gets_input_puzzle,
-                                                           use_stop_token=use_stop_token, stop_token_id=stop_token_id,
-                                                           lstm_hidden_dim=self.lstm_hidden_dim)
+                                                        receives_input_encoding=receiver_gets_input_puzzle,
+                                                        encoder_latent_dim=encoder.latent_dim,
+                                                        use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                                        lstm_hidden_dim=self.lstm_hidden_dim)
             elif task_type == 'puzzle_classification':
                 assert num_classes is not None
                 self.receiver = ReceiverPuzzleClassifier(vocab_size, num_classes, hidden_dim,
@@ -737,7 +709,7 @@ class ARCAutoencoder(nn.Module):
             raise ValueError(f"Unknown bottleneck_type: {bottleneck_type}")
     
     def forward(self, x, sizes, temperature=1.0, candidates_list=None, candidates_sizes_list=None, 
-                target_indices=None, labels=None, output_sizes=None):  # <--- Add output_sizes parameter
+                target_indices=None, labels=None, output_sizes=None):
         """
         Args:
             x: Input grids
@@ -752,6 +724,9 @@ class ARCAutoencoder(nn.Module):
         
         if self.task_type == 'reconstruction':
             if self.bottleneck_type == 'communication':
+                # Compute latent first (for shared common ground)
+                latent = self.encoder(x, sizes=sizes)
+                
                 messages, soft_messages, message_lengths = self.sender(x, sizes=sizes, temperature=temperature)
                 
                 logits_list = []
@@ -761,21 +736,20 @@ class ARCAutoencoder(nn.Module):
                     single_message = messages[i:i+1]
                     soft_single = soft_messages[i:i+1]
                     single_length = message_lengths[i:i+1]
-                    target_h, target_w = target_sizes[i]  # <--- Use target size, not input size
+                    target_h, target_w = target_sizes[i]
                     
-                    # Pass input puzzle to receiver if configured
+                    # Pass encoder's latent to receiver if configured
                     if self.receiver_gets_input_puzzle:
-                        input_puzzle = x[i:i+1]
-                        input_size = sizes[i]  # Input size for context
+                        # Pass encoder's latent (shared common ground)
+                        input_encoding = latent[i:i+1]
                         logits = self.receiver(single_message, 
-                                            target_size=(target_h, target_w),  # <--- Correct target size
+                                            target_size=(target_h, target_w),
                                             soft_message=soft_single,
-                                            input_puzzle=input_puzzle,
-                                            input_size=input_size,
+                                            input_encoding=input_encoding,
                                             message_lengths=single_length)
                     else:
                         logits = self.receiver(single_message, 
-                                            target_size=(target_h, target_w),  # <--- Correct target size
+                                            target_size=(target_h, target_w),
                                             soft_message=soft_single,
                                             message_lengths=single_length)
                     
@@ -803,6 +777,9 @@ class ARCAutoencoder(nn.Module):
         
         elif self.task_type == 'selection':
             if self.bottleneck_type == 'communication':
+                # Compute latent first (for shared common ground in reconstruction)
+                latent = self.encoder(x, sizes=sizes)
+                
                 messages, soft_messages, message_lengths = self.sender(x, sizes=sizes, temperature=temperature)
                 
                 selection_logits_list = []
@@ -819,24 +796,24 @@ class ARCAutoencoder(nn.Module):
                     
                     # Selection task
                     sel_logits = self.receiver(single_message, candidates, 
-                                              candidate_sizes=candidate_sizes,
-                                              soft_message=soft_single,
-                                              message_lengths=single_length)
+                                            candidate_sizes=candidate_sizes,
+                                            soft_message=soft_single,
+                                            message_lengths=single_length)
                     
                     selection_logits_list.append(sel_logits)
                     
                     # Background reconstruction task
                     # Detach soft_message so gradients only flow to receiver_reconstructor
                     if self.receiver_gets_input_puzzle:
-                        input_puzzle = x[i:i+1]
-                        input_size = sizes[i]
+                        # Pass encoder's latent (shared common ground)
+                        # Detach to prevent gradients flowing back through encoder via reconstruction path
+                        input_encoding = latent[i:i+1].detach() if self.training else latent[i:i+1]
                         if self.training:
                             recon_logits = self.receiver_reconstructor(
                                 single_message, 
                                 target_size=(actual_h, actual_w),
                                 soft_message=soft_single.detach(),
-                                input_puzzle=input_puzzle,
-                                input_size=input_size,
+                                input_encoding=input_encoding,
                                 message_lengths=single_length
                             )
                         else:
@@ -844,8 +821,7 @@ class ARCAutoencoder(nn.Module):
                                 single_message, 
                                 target_size=(actual_h, actual_w),
                                 soft_message=soft_single,
-                                input_puzzle=input_puzzle,
-                                input_size=input_size,
+                                input_encoding=input_encoding,
                                 message_lengths=single_length
                             )
                     else:

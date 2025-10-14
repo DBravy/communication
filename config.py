@@ -2,7 +2,7 @@
 
 # Data
 DATA_PATH = 'arc-agi_test_challenges.json'  # Legacy single-file format (deprecated)
-DATASET_VERSION = 'V2'  # 'V1' or 'V2' - which dataset version to use
+DATASET_VERSION = 'V1'  # 'V1' or 'V2' - which dataset version to use
 DATASET_SPLIT = 'training'  # 'training' or 'evaluation' - which split to use
 NUM_COLORS = 10
 MIN_GRID_SIZE = 3
@@ -26,9 +26,9 @@ USE_INPUT_OUTPUT_PAIRS = True  # If True, train on input→output transformation
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
 VOCAB_SIZE = 25  # Size of discrete symbol vocabulary (actual vocab, stop token is separate)
-MAX_MESSAGE_LENGTH = 2  # Maximum length of message sequences
+MAX_MESSAGE_LENGTH = 5  # Maximum length of message sequences
 TEMPERATURE = 1.0  # Gumbel-softmax temperature
-RECEIVER_GETS_INPUT_PUZZLE = True  # If True, receiver also gets the input puzzle in addition to symbols (helps with reconstruction)
+RECEIVER_GETS_INPUT_PUZZLE = True # If True, receiver also gets the encoder's latent (shared common ground)
 USE_STOP_TOKEN = True  # If True, agents can emit a stop token to terminate messages early (variable length)
 STOP_TOKEN_ID = VOCAB_SIZE  # ID for the stop token (should be VOCAB_SIZE, as it's appended to the vocabulary)
 
@@ -50,8 +50,8 @@ LOAD_PRETRAINED_BEFORE_PRETRAIN = None  # Path to pretrained encoder to load bef
 
 # Training
 BATCH_SIZE = 32
-LEARNING_RATE = 1e-5
-NUM_EPOCHS = 10000
+LEARNING_RATE = 1e-4
+NUM_EPOCHS = 100000
 DEVICE = 'cuda'  # or 'cuda'
 
 # Logging
