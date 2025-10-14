@@ -470,6 +470,79 @@
             background: #eff6ff;
             border-color: #667eea;
         }
+        
+        .config-status {
+            background: #fff7ed;
+            border: 2px solid #fb923c;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+        }
+        
+        .config-status.saved {
+            background: #f0fdf4;
+            border-color: #86efac;
+        }
+        
+        .config-status-text {
+            flex: 1;
+        }
+        
+        .config-status-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 5px;
+        }
+        
+        .config-status-details {
+            font-size: 12px;
+            color: #6b7280;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .btn-save-config {
+            background: #f59e0b;
+            color: white;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-save-config:hover:not(:disabled) {
+            background: #d97706;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(245, 158, 11, 0.3);
+        }
+        
+        .btn-save-config.saved {
+            background: #10b981;
+        }
+        
+        .btn-save-config.saved:hover:not(:disabled) {
+            background: #059669;
+        }
+        
+        .config-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #fb923c;
+            margin-right: 8px;
+        }
+        
+        .config-indicator.saved {
+            background: #10b981;
+        }
     </style>
 </head>
 <body>
@@ -478,6 +551,23 @@
             <a href="/" class="nav-link">← Training Monitor</a>
             <h1>ARC Puzzle Solver</h1>
             <p>Solve individual puzzles using finetuned models</p>
+        </div>
+        
+        <div style="padding: 20px 30px; padding-bottom: 0;">
+            <div id="configStatus" class="config-status">
+                <div class="config-status-text">
+                    <div class="config-status-title">
+                        <span id="configIndicator" class="config-indicator"></span>
+                        <span id="configStatusTitle">Configuration Not Saved</span>
+                    </div>
+                    <div class="config-status-details" id="configStatusDetails">
+                        Please configure and save your settings before running tests
+                    </div>
+                </div>
+                <button id="saveConfigBtn" class="btn-save-config" onclick="saveConfiguration()">
+                    💾 Save Configuration
+                </button>
+            </div>
         </div>
         
         <div class="controls">
@@ -686,12 +776,123 @@
         let finetuningEventSource = null;
         let batchTestEventSource = null;
         let batchResults = [];
+        let configSaved = false;
+        let savedConfig = null;
         
         // Load checkpoints and puzzles on page load
         window.addEventListener('load', () => {
             refreshCheckpoints();
             refreshPuzzles();
+            attachConfigChangeListeners();
+            updateConfigStatus();
         });
+        
+        // Attach change listeners to all configuration inputs
+        function attachConfigChangeListeners() {
+            const configInputs = [
+                'datasetVersion',
+                'datasetSplit',
+                'checkpointSelect',
+                'finetuneEpochs',
+                'finetuneLR',
+                'finetuneReceiverLR',
+                'finetuneBatchSize',
+                'finetuneEarlyStop'
+            ];
+            
+            configInputs.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('change', markConfigAsUnsaved);
+                    element.addEventListener('input', markConfigAsUnsaved);
+                }
+            });
+        }
+        
+        function markConfigAsUnsaved() {
+            configSaved = false;
+            updateConfigStatus();
+        }
+        
+        function saveConfiguration() {
+            const checkpoint = document.getElementById('checkpointSelect').value;
+            
+            if (!checkpoint) {
+                alert('Please select a checkpoint before saving configuration');
+                return;
+            }
+            
+            // Save current configuration
+            savedConfig = {
+                datasetVersion: document.getElementById('datasetVersion').value,
+                datasetSplit: document.getElementById('datasetSplit').value,
+                checkpoint: checkpoint,
+                epochs: parseInt(document.getElementById('finetuneEpochs').value) || 500,
+                lr: parseFloat(document.getElementById('finetuneLR').value) || 1e-4,
+                receiverLR: document.getElementById('finetuneReceiverLR').value ? 
+                           parseFloat(document.getElementById('finetuneReceiverLR').value) : null,
+                batchSize: parseInt(document.getElementById('finetuneBatchSize').value) || 8,
+                earlyStopThreshold: parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0
+            };
+            
+            configSaved = true;
+            updateConfigStatus();
+            
+            // Show brief success message
+            const statusDetails = document.getElementById('configStatusDetails');
+            const originalText = statusDetails.textContent;
+            statusDetails.textContent = 'Configuration saved successfully! ✓';
+            setTimeout(() => {
+                updateConfigStatus();
+            }, 2000);
+        }
+        
+        function updateConfigStatus() {
+            const statusDiv = document.getElementById('configStatus');
+            const indicator = document.getElementById('configIndicator');
+            const title = document.getElementById('configStatusTitle');
+            const details = document.getElementById('configStatusDetails');
+            const saveBtn = document.getElementById('saveConfigBtn');
+            
+            if (configSaved && savedConfig) {
+                statusDiv.classList.add('saved');
+                indicator.classList.add('saved');
+                saveBtn.classList.add('saved');
+                title.textContent = 'Configuration Saved';
+                
+                const checkpointName = savedConfig.checkpoint.split('/').pop();
+                const receiverLRText = savedConfig.receiverLR ? savedConfig.receiverLR.toExponential(2) : 'same as base';
+                details.innerHTML = `
+                    Checkpoint: <strong>${checkpointName}</strong> | 
+                    Dataset: <strong>${savedConfig.datasetVersion}/${savedConfig.datasetSplit}</strong> | 
+                    Epochs: <strong>${savedConfig.epochs}</strong> | 
+                    LR: <strong>${savedConfig.lr.toExponential(2)}</strong> | 
+                    Receiver LR: <strong>${receiverLRText}</strong> | 
+                    Batch: <strong>${savedConfig.batchSize}</strong> | 
+                    Early Stop: <strong>${savedConfig.earlyStopThreshold}%</strong>
+                `;
+                saveBtn.textContent = '✓ Configuration Saved';
+                
+                // Enable action buttons
+                if (currentPuzzleId) {
+                    document.getElementById('finetuneSolveBtn').disabled = false;
+                    document.getElementById('solveBtn').disabled = false;
+                }
+                document.getElementById('batchTestBtn').disabled = false;
+            } else {
+                statusDiv.classList.remove('saved');
+                indicator.classList.remove('saved');
+                saveBtn.classList.remove('saved');
+                title.textContent = 'Configuration Not Saved';
+                details.textContent = 'Please configure and save your settings before running tests';
+                saveBtn.textContent = '💾 Save Configuration';
+                
+                // Disable action buttons
+                document.getElementById('finetuneSolveBtn').disabled = true;
+                document.getElementById('solveBtn').disabled = true;
+                document.getElementById('batchTestBtn').disabled = true;
+            }
+        }
         
         function refreshCheckpoints() {
             fetch('/list_checkpoints')
@@ -757,6 +958,8 @@
                         select.innerHTML = '<option value="">No puzzles found</option>';
                         showStatus('No puzzles found in dataset');
                     }
+                    
+                    // Mark config as unsaved when dataset changes (triggered by event listeners)
                 })
                 .catch(error => {
                     console.error('Error loading puzzles:', error);
@@ -865,14 +1068,13 @@
             
             currentPuzzleId = puzzleId;
             
-            // Enable buttons
-            document.getElementById('finetuneSolveBtn').disabled = false;
-            document.getElementById('solveBtn').disabled = false;
+            // Update button states based on config status
+            updateConfigStatus();
             
             // Clear previous results
             document.getElementById('resultsSection').style.display = 'none';
             
-            showStatus(`Puzzle ${puzzleId} loaded. Select a checkpoint and action.`);
+            showStatus(`Puzzle ${puzzleId} loaded. ${configSaved ? 'Ready to solve.' : 'Please save configuration to proceed.'}`);
         }
         
         function finetuneAndSolvePuzzle() {
@@ -881,9 +1083,12 @@
                 return;
             }
             
-            const checkpoint = document.getElementById('checkpointSelect').value;
+            if (!configSaved || !savedConfig) {
+                alert('Please save your configuration before running tests');
+                return;
+            }
             
-            if (!confirm(`Finetune and solve puzzle ${currentPuzzleId}?\n\nThis will train a model specifically for this puzzle and then solve it. This may take several minutes.`)) {
+            if (!confirm(`Finetune and solve puzzle ${currentPuzzleId}?\n\nUsing saved configuration:\n- Checkpoint: ${savedConfig.checkpoint.split('/').pop()}\n- Epochs: ${savedConfig.epochs}\n- Learning Rate: ${savedConfig.lr}\n\nThis will train a model specifically for this puzzle and then solve it. This may take several minutes.`)) {
                 return;
             }
             
@@ -894,16 +1099,15 @@
             document.getElementById('finetuneSolveBtn').disabled = true;
             document.getElementById('solveBtn').disabled = true;
             
-            const datasetVersion = document.getElementById('datasetVersion').value;
-            const datasetSplit = document.getElementById('datasetSplit').value;
-            
-            // Get finetuning parameters from inputs
-            const epochs = parseInt(document.getElementById('finetuneEpochs').value) || 500;
-            const lr = parseFloat(document.getElementById('finetuneLR').value) || 1e-4;
-            const receiverLRValue = document.getElementById('finetuneReceiverLR').value;
-            const receiverLR = receiverLRValue ? parseFloat(receiverLRValue) : null;
-            const batchSize = parseInt(document.getElementById('finetuneBatchSize').value) || 8;
-            const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+            // Use saved configuration
+            const datasetVersion = savedConfig.datasetVersion;
+            const datasetSplit = savedConfig.datasetSplit;
+            const checkpoint = savedConfig.checkpoint;
+            const epochs = savedConfig.epochs;
+            const lr = savedConfig.lr;
+            const receiverLR = savedConfig.receiverLR;
+            const batchSize = savedConfig.batchSize;
+            const earlyStopThreshold = savedConfig.earlyStopThreshold;
             
             // Step 1: Start finetuning
             fetch('/finetune_puzzle', {
@@ -925,8 +1129,7 @@
             .then(data => {
                 if (data.error) {
                     showStatus(`Error starting finetuning: ${data.error}`);
-                    document.getElementById('finetuneSolveBtn').disabled = false;
-                    document.getElementById('solveBtn').disabled = false;
+                    updateConfigStatus();
                     hideProgress();
                     return;
                 }
@@ -945,7 +1148,7 @@
                         const earlyStopInfo = progress.early_stop_threshold ? ` (early stop at ${progress.early_stop_threshold}%)` : '';
                         showStatus(`Finetuning started: ${progress.total_epochs} epochs${earlyStopInfo}`, true);
                     } else if (progress.status === 'progress') {
-                        const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+                        const earlyStopThreshold = savedConfig ? savedConfig.earlyStopThreshold : 99.0;
                         const statusText = progress.accuracy >= earlyStopThreshold - 1 ? 
                             `Finetuning in progress... (approaching ${earlyStopThreshold}% target)` : 
                             `Finetuning in progress...`;
@@ -962,14 +1165,12 @@
                         setTimeout(() => proceedToSolving(progress), 1000);
                     } else if (progress.status === 'stopped') {
                         showStatus(`⏹ ${progress.message}`, false);
-                        document.getElementById('finetuneSolveBtn').disabled = false;
-                        document.getElementById('solveBtn').disabled = false;
+                        updateConfigStatus();
                         hideProgress();
                         finetuningEventSource.close();
                     } else if (progress.status === 'error') {
                         showStatus(`Error during finetuning: ${progress.message}`);
-                        document.getElementById('finetuneSolveBtn').disabled = false;
-                        document.getElementById('solveBtn').disabled = false;
+                        updateConfigStatus();
                         hideProgress();
                         finetuningEventSource.close();
                     }
@@ -982,8 +1183,7 @@
             })
             .catch(error => {
                 showStatus(`Error starting finetuning: ${error.message}`);
-                document.getElementById('finetuneSolveBtn').disabled = false;
-                document.getElementById('solveBtn').disabled = false;
+                updateConfigStatus();
                 hideProgress();
             });
         }
@@ -998,8 +1198,9 @@
             showStatus(`Step 2/2: Solving puzzle...`, true);
             hideProgress();
             
-            const datasetVersion = document.getElementById('datasetVersion').value;
-            const datasetSplit = document.getElementById('datasetSplit').value;
+            // Use saved configuration
+            const datasetVersion = savedConfig.datasetVersion;
+            const datasetSplit = savedConfig.datasetSplit;
             const finetunedCheckpoint = finetuneData.checkpoint_path;
             
             fetch('/solve_puzzle', {
@@ -1016,14 +1217,14 @@
             .then(solveData => {
                 if (solveData.error) {
                     showStatus(`Error during solving: ${solveData.error}`);
-                    document.getElementById('finetuneSolveBtn').disabled = false;
-                    document.getElementById('solveBtn').disabled = false;
+                    updateConfigStatus();
                 } else {
                     currentResults = solveData;
                     displayResults(solveData);
                     hideStatus();
-                    document.getElementById('finetuneSolveBtn').disabled = false;
-                    document.getElementById('solveBtn').disabled = false;
+                    
+                    // Re-enable buttons based on config status
+                    updateConfigStatus();
                     
                     // Refresh checkpoints to show the new finetuned model
                     refreshCheckpoints();
@@ -1031,8 +1232,7 @@
             })
             .catch(error => {
                 showStatus(`Error during solving: ${error.message}`);
-                document.getElementById('finetuneSolveBtn').disabled = false;
-                document.getElementById('solveBtn').disabled = false;
+                updateConfigStatus();
             });
         }
         
@@ -1042,20 +1242,20 @@
                 return;
             }
             
-            const checkpoint = document.getElementById('checkpointSelect').value;
-            
-            if (!checkpoint) {
-                alert('Please select a checkpoint');
+            if (!configSaved || !savedConfig) {
+                alert('Please save your configuration before running tests');
                 return;
             }
             
-            showStatus(`Solving puzzle ${currentPuzzleId}...`, true);
+            showStatus(`Solving puzzle ${currentPuzzleId} using saved configuration...`, true);
             
             // Disable buttons during solving
             document.getElementById('solveBtn').disabled = true;
             
-            const datasetVersion = document.getElementById('datasetVersion').value;
-            const datasetSplit = document.getElementById('datasetSplit').value;
+            // Use saved configuration
+            const datasetVersion = savedConfig.datasetVersion;
+            const datasetSplit = savedConfig.datasetSplit;
+            const checkpoint = savedConfig.checkpoint;
             
             fetch('/solve_puzzle', {
                 method: 'POST',
@@ -1071,17 +1271,17 @@
             .then(data => {
                 if (data.error) {
                     showStatus(`Error: ${data.error}`);
-                    document.getElementById('solveBtn').disabled = false;
+                    updateConfigStatus();
                 } else {
                     currentResults = data;
                     displayResults(data);
                     hideStatus();
-                    document.getElementById('solveBtn').disabled = false;
+                    updateConfigStatus();
                 }
             })
             .catch(error => {
                 showStatus(`Error during solving: ${error.message}`);
-                document.getElementById('solveBtn').disabled = false;
+                updateConfigStatus();
             });
         }
         
@@ -1204,19 +1404,24 @@
         }
         
         function startBatchTest() {
-            const datasetVersion = document.getElementById('datasetVersion').value;
-            const datasetSplit = document.getElementById('datasetSplit').value;
-            const checkpoint = document.getElementById('checkpointSelect').value;
+            if (!configSaved || !savedConfig) {
+                alert('Please save your configuration before running batch tests');
+                return;
+            }
             
-            // Get finetuning parameters
-            const epochs = parseInt(document.getElementById('finetuneEpochs').value) || 500;
-            const lr = parseFloat(document.getElementById('finetuneLR').value) || 1e-4;
-            const receiverLRValue = document.getElementById('finetuneReceiverLR').value;
-            const receiverLR = receiverLRValue ? parseFloat(receiverLRValue) : null;
-            const batchSize = parseInt(document.getElementById('finetuneBatchSize').value) || 8;
-            const earlyStopThreshold = parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0;
+            // Use saved configuration
+            const datasetVersion = savedConfig.datasetVersion;
+            const datasetSplit = savedConfig.datasetSplit;
+            const checkpoint = savedConfig.checkpoint;
+            const epochs = savedConfig.epochs;
+            const lr = savedConfig.lr;
+            const receiverLR = savedConfig.receiverLR;
+            const batchSize = savedConfig.batchSize;
+            const earlyStopThreshold = savedConfig.earlyStopThreshold;
             
-            if (!confirm(`Run batch test on ALL puzzles in ${datasetVersion}/${datasetSplit}?\n\nThis will finetune and solve each puzzle. This may take a very long time.`)) {
+            const configSummary = `\nUsing saved configuration:\n- Checkpoint: ${checkpoint.split('/').pop()}\n- Epochs: ${epochs}\n- Learning Rate: ${lr}\n- Batch Size: ${batchSize}\n- Early Stop: ${earlyStopThreshold}%`;
+            
+            if (!confirm(`Run batch test on ALL puzzles in ${datasetVersion}/${datasetSplit}?${configSummary}\n\nThis will finetune and solve each puzzle. This may take a very long time.`)) {
                 return;
             }
             
@@ -1274,9 +1479,7 @@
                     .then(data => {
                         if (data.error) {
                             showStatus(`Error starting batch test: ${data.error}`);
-                            document.getElementById('batchTestBtn').disabled = false;
-                            document.getElementById('finetuneSolveBtn').disabled = false;
-                            document.getElementById('solveBtn').disabled = false;
+                            updateConfigStatus();
                             hideProgress();
                             return;
                         }
@@ -1332,10 +1535,8 @@
                                 displayBatchResults(progress.results);
                                 batchTestEventSource.close();
                                 
-                                // Re-enable buttons
-                                document.getElementById('batchTestBtn').disabled = false;
-                                document.getElementById('finetuneSolveBtn').disabled = false;
-                                document.getElementById('solveBtn').disabled = false;
+                                // Re-enable buttons based on config status
+                                updateConfigStatus();
                             } else if (progress.status === 'stopped') {
                                 showStatus(`⏹ ${progress.message} - Processed ${progress.processed_puzzles}/${progress.total_puzzles} puzzles`, false);
                                 hideProgress();
@@ -1343,19 +1544,15 @@
                                     displayBatchResults(batchResults);
                                 }
                                 document.getElementById('batchCurrentPuzzle').style.display = 'none';
-                                document.getElementById('batchTestBtn').disabled = false;
-                                document.getElementById('finetuneSolveBtn').disabled = false;
-                                document.getElementById('solveBtn').disabled = false;
+                                updateConfigStatus();
                                 batchTestEventSource.close();
                             } else if (progress.status === 'error') {
                                 showStatus(`Error during batch test: ${progress.message}`);
                                 hideProgress();
                                 batchTestEventSource.close();
                                 
-                                // Re-enable buttons
-                                document.getElementById('batchTestBtn').disabled = false;
-                                document.getElementById('finetuneSolveBtn').disabled = false;
-                                document.getElementById('solveBtn').disabled = false;
+                                // Re-enable buttons based on config status
+                                updateConfigStatus();
                             }
                         };
                         
@@ -1366,14 +1563,13 @@
                     })
                     .catch(error => {
                         showStatus(`Error starting batch test: ${error.message}`);
-                        document.getElementById('batchTestBtn').disabled = false;
-                        document.getElementById('finetuneSolveBtn').disabled = false;
-                        document.getElementById('solveBtn').disabled = false;
+                        updateConfigStatus();
                         hideProgress();
                     });
                 })
                 .catch(error => {
                     showStatus(`Error loading puzzles: ${error.message}`);
+                    updateConfigStatus();
                 });
         }
         
