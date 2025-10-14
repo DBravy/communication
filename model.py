@@ -19,7 +19,8 @@ class ARCEncoder(nn.Module):
                  embedding_dim=10,
                  hidden_dim=128,
                  latent_dim=512,
-                 num_conv_layers=3):
+                 num_conv_layers=3,
+                 conv_channels=None):
         super().__init__()
         
         self.num_colors = num_colors
@@ -28,6 +29,18 @@ class ARCEncoder(nn.Module):
         self.latent_dim = latent_dim
         self.num_conv_layers = num_conv_layers
         
+        # Configure per-layer output channels for conv stack
+        if conv_channels is None:
+            self.conv_channels = [hidden_dim] * num_conv_layers
+        else:
+            # Accept either a single int (apply to all) or a list of length num_conv_layers
+            if isinstance(conv_channels, int):
+                self.conv_channels = [conv_channels] * num_conv_layers
+            else:
+                assert isinstance(conv_channels, (list, tuple)), "conv_channels must be int or list/tuple of ints"
+                assert len(conv_channels) == num_conv_layers, "conv_channels length must equal num_conv_layers"
+                self.conv_channels = list(conv_channels)
+        
         assert embedding_dim == num_colors, "embedding_dim must equal num_colors for one-hot encoding"
         assert num_conv_layers >= 1, "Must have at least 1 convolutional layer"
         
@@ -35,14 +48,15 @@ class ARCEncoder(nn.Module):
         self.bn_layers = nn.ModuleList()
         
         for i in range(num_conv_layers):
-            in_channels = embedding_dim if i == 0 else hidden_dim
+            in_channels = embedding_dim if i == 0 else self.conv_channels[i-1]
+            out_channels = self.conv_channels[i]
             self.conv_layers.append(
-                nn.Conv2d(in_channels, hidden_dim, kernel_size=3, padding=1)
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
             )
-            self.bn_layers.append(nn.BatchNorm2d(hidden_dim))
+            self.bn_layers.append(nn.BatchNorm2d(out_channels))
         
         self.pool = nn.AdaptiveAvgPool2d((4, 4))
-        self.fc = nn.Linear(hidden_dim * 4 * 4, latent_dim)
+        self.fc = nn.Linear(self.conv_channels[-1] * 4 * 4, latent_dim)
         
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.1)
@@ -162,7 +176,7 @@ class SenderAgent(nn.Module):
     FIXED: Sender that returns both discrete and soft representations.
     Supports variable-length messages via stop tokens.
     """
-    def __init__(self, encoder, vocab_size, max_length, use_stop_token=False, stop_token_id=None):
+    def __init__(self, encoder, vocab_size, max_length, use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.encoder = encoder
         self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
@@ -173,8 +187,13 @@ class SenderAgent(nn.Module):
         self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
         self.stop_token_id = stop_token_id if use_stop_token else None
         
-        self.lstm = nn.LSTM(self.effective_vocab_size, encoder.latent_dim, batch_first=True)
-        self.vocab_proj = nn.Linear(encoder.latent_dim, self.effective_vocab_size)
+        # Allow custom LSTM hidden size; default to encoder latent dim
+        self.lstm_hidden_dim = encoder.latent_dim if lstm_hidden_dim is None else lstm_hidden_dim
+        self.lstm = nn.LSTM(self.effective_vocab_size, self.lstm_hidden_dim, batch_first=True)
+        self.vocab_proj = nn.Linear(self.lstm_hidden_dim, self.effective_vocab_size)
+        # Project encoder latent to LSTM hidden dim if needed
+        self.latent_to_hidden = (nn.Identity() if self.lstm_hidden_dim == encoder.latent_dim
+                                 else nn.Linear(encoder.latent_dim, self.lstm_hidden_dim))
         
     def forward(self, grids, sizes=None, temperature=1.0):
         """
@@ -187,7 +206,8 @@ class SenderAgent(nn.Module):
         
         latent = self.encoder(grids, sizes=sizes)
         
-        h = latent.unsqueeze(0)
+        # Initialize LSTM hidden state from (projected) latent
+        h = self.latent_to_hidden(latent).unsqueeze(0)
         c = torch.zeros_like(h)
         
         hard_messages = []
@@ -263,7 +283,7 @@ class ReceiverAgent(nn.Module):
     Can optionally also receive the input puzzle to aid reconstruction.
     Supports variable-length messages via masking.
     """
-    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30, receives_input_puzzle=False, use_stop_token=False, stop_token_id=None):
+    def __init__(self, vocab_size, num_colors, hidden_dim, max_grid_size=30, receives_input_puzzle=False, use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_colors = num_colors
@@ -272,6 +292,7 @@ class ReceiverAgent(nn.Module):
         self.receives_input_puzzle = receives_input_puzzle
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id if use_stop_token else None
+        self.lstm_hidden_dim = hidden_dim if lstm_hidden_dim is None else lstm_hidden_dim
         
         # If using stop tokens, effective vocab is vocab_size + 1
         self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
@@ -279,7 +300,7 @@ class ReceiverAgent(nn.Module):
         self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
         self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(hidden_dim, self.lstm_hidden_dim, batch_first=True)
         
         # If receiver gets input puzzle, add an encoder for it
         if receives_input_puzzle:
@@ -292,11 +313,12 @@ class ReceiverAgent(nn.Module):
             self.input_puzzle_fc = nn.Linear(hidden_dim * 4 * 4, hidden_dim)
             
             # Combine message and input puzzle representations
-            self.combine_fc = nn.Linear(hidden_dim * 2, hidden_dim)
+            self.combine_fc = nn.Linear(self.lstm_hidden_dim + hidden_dim, hidden_dim)
         
         self.relu = nn.ReLU()
         
-        self.fc_decode = nn.Linear(hidden_dim, hidden_dim * 4 * 4)
+        # Map from message representation (from LSTM hidden) into decoder input
+        self.fc_decode = nn.Linear(self.lstm_hidden_dim, hidden_dim * 4 * 4)
         
         self.deconv1 = nn.ConvTranspose2d(hidden_dim, hidden_dim,
                                          kernel_size=4, stride=2, padding=1)
@@ -400,13 +422,14 @@ class ReceiverAgent(nn.Module):
 
 class ReceiverPuzzleClassifier(nn.Module):
     """Receiver for puzzle classification task. Supports variable-length messages."""
-    def __init__(self, vocab_size, num_classes, hidden_dim, use_stop_token=False, stop_token_id=None):
+    def __init__(self, vocab_size, num_classes, hidden_dim, use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_classes = num_classes
         self.hidden_dim = hidden_dim
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id if use_stop_token else None
+        self.lstm_hidden_dim = hidden_dim if lstm_hidden_dim is None else lstm_hidden_dim
         
         # If using stop tokens, effective vocab is vocab_size + 1
         self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
@@ -414,10 +437,10 @@ class ReceiverPuzzleClassifier(nn.Module):
         self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
         self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(hidden_dim, self.lstm_hidden_dim, batch_first=True)
         
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, 256),
+            nn.Linear(self.lstm_hidden_dim, 256),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(256, 128),
@@ -459,7 +482,7 @@ class ReceiverSelector(nn.Module):
     This prevents CrossEntropyLoss gradients from canceling out.
     Supports variable-length messages via masking.
     """
-    def __init__(self, vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers=2, use_stop_token=False, stop_token_id=None):
+    def __init__(self, vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers=2, use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.vocab_size = vocab_size  # Base vocabulary size (without stop token)
         self.num_colors = num_colors
@@ -468,6 +491,7 @@ class ReceiverSelector(nn.Module):
         self.num_conv_layers = num_conv_layers
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id if use_stop_token else None
+        self.lstm_hidden_dim = hidden_dim if lstm_hidden_dim is None else lstm_hidden_dim
         
         assert embedding_dim == num_colors
         assert num_conv_layers >= 1
@@ -478,7 +502,7 @@ class ReceiverSelector(nn.Module):
         self.symbol_embed = nn.Embedding(self.effective_vocab_size, hidden_dim)
         self.continuous_proj = nn.Linear(self.effective_vocab_size, hidden_dim)
         
-        self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
+        self.lstm = nn.LSTM(hidden_dim, self.lstm_hidden_dim, batch_first=True)
         
         self.conv_layers = nn.ModuleList()
         self.bn_layers = nn.ModuleList()
@@ -495,7 +519,7 @@ class ReceiverSelector(nn.Module):
         
         # FIXED: Instead of concatenating and using a linear layer,
         # we use separate projections and compute similarity
-        self.msg_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.msg_proj = nn.Linear(self.lstm_hidden_dim, hidden_dim)
         self.cand_proj = nn.Linear(hidden_dim, hidden_dim)
         
         # Learnable temperature parameter
@@ -663,7 +687,7 @@ class ARCAutoencoder(nn.Module):
     def __init__(self, encoder, vocab_size, max_length, num_colors, embedding_dim, hidden_dim, 
                  max_grid_size=30, bottleneck_type='communication', task_type='reconstruction', 
                  num_conv_layers=2, num_classes=None, receiver_gets_input_puzzle=False,
-                 use_stop_token=False, stop_token_id=None):
+                 use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
         super().__init__()
         self.encoder = encoder
         self.bottleneck_type = bottleneck_type
@@ -671,25 +695,30 @@ class ARCAutoencoder(nn.Module):
         self.receiver_gets_input_puzzle = receiver_gets_input_puzzle
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id
+        self.lstm_hidden_dim = lstm_hidden_dim
         
         if bottleneck_type == 'communication':
-            self.sender = SenderAgent(encoder, vocab_size, max_length, use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+            self.sender = SenderAgent(encoder, vocab_size, max_length, use_stop_token=use_stop_token, stop_token_id=stop_token_id, lstm_hidden_dim=self.lstm_hidden_dim)
             if task_type == 'reconstruction':
                 self.receiver = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size, 
                                              receives_input_puzzle=receiver_gets_input_puzzle,
-                                             use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+                                             use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                             lstm_hidden_dim=self.lstm_hidden_dim)
             elif task_type == 'selection':
                 # In selection mode, create BOTH receivers
                 self.receiver = ReceiverSelector(vocab_size, num_colors, embedding_dim, hidden_dim, num_conv_layers,
-                                                use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+                                                use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                                lstm_hidden_dim=self.lstm_hidden_dim)
                 # Add reconstruction receiver for background training
                 self.receiver_reconstructor = ReceiverAgent(vocab_size, num_colors, hidden_dim, max_grid_size,
                                                            receives_input_puzzle=receiver_gets_input_puzzle,
-                                                           use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+                                                           use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                                           lstm_hidden_dim=self.lstm_hidden_dim)
             elif task_type == 'puzzle_classification':
                 assert num_classes is not None
                 self.receiver = ReceiverPuzzleClassifier(vocab_size, num_classes, hidden_dim,
-                                                        use_stop_token=use_stop_token, stop_token_id=stop_token_id)
+                                                        use_stop_token=use_stop_token, stop_token_id=stop_token_id,
+                                                        lstm_hidden_dim=self.lstm_hidden_dim)
             else:
                 raise ValueError(f"Unknown task_type: {task_type}")
         elif bottleneck_type == 'autoencoder':

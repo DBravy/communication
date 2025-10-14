@@ -643,6 +643,14 @@
                         <label for="numConvLayers">Conv Layers:</label>
                         <input type="number" id="numConvLayers" min="1" max="5" value="3" onchange="markConfigDirty()">
                     </div>
+                    <div class="config-group">
+                        <label for="encoderConvChannels">Conv Channels (JSON or int):</label>
+                        <input type="text" id="encoderConvChannels" placeholder="e.g. [64,128,256] or 128" style="width: 260px;" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="lstmHiddenDim">LSTM Hidden Dim:</label>
+                        <input type="number" id="lstmHiddenDim" min="16" max="2048" step="16" placeholder="(default = hidden dim)" onchange="markConfigDirty()">
+                    </div>
                 </div>
             </div>
 
@@ -884,6 +892,8 @@
                 document.getElementById('hiddenDim').value = data.hidden_dim || 128;
                 document.getElementById('latentDim').value = data.latent_dim || 128;
                 document.getElementById('numConvLayers').value = data.num_conv_layers || 3;
+                document.getElementById('encoderConvChannels').value = (data.encoder_conv_channels === null || data.encoder_conv_channels === undefined) ? '' : (Array.isArray(data.encoder_conv_channels) ? JSON.stringify(data.encoder_conv_channels) : data.encoder_conv_channels);
+                document.getElementById('lstmHiddenDim').value = data.lstm_hidden_dim || '';
                 
                 // Communication protocol
                 document.getElementById('vocabSize').value = data.vocab_size || 100;
@@ -1015,6 +1025,21 @@
             const hiddenDim = document.getElementById('hiddenDim').value;
             const latentDim = document.getElementById('latentDim').value;
             const numConvLayers = document.getElementById('numConvLayers').value;
+            const encoderConvChannelsRaw = document.getElementById('encoderConvChannels').value;
+            let encoderConvChannels = null;
+            if (encoderConvChannelsRaw && encoderConvChannelsRaw.trim().length > 0) {
+                try {
+                    if (encoderConvChannelsRaw.trim().startsWith('[')) {
+                        encoderConvChannels = JSON.parse(encoderConvChannelsRaw);
+                    } else {
+                        encoderConvChannels = parseInt(encoderConvChannelsRaw);
+                    }
+                } catch (e) {
+                    alert('Invalid Conv Channels format. Use JSON array like [64,128,256] or a single integer.');
+                    return;
+                }
+            }
+            const lstmHiddenDim = document.getElementById('lstmHiddenDim').value;
             
             // Communication protocol
             const vocabSize = document.getElementById('vocabSize').value;
@@ -1051,6 +1076,8 @@
                     hidden_dim: parseInt(hiddenDim),
                     latent_dim: parseInt(latentDim),
                     num_conv_layers: parseInt(numConvLayers),
+                    encoder_conv_channels: encoderConvChannels,
+                    lstm_hidden_dim: lstmHiddenDim ? parseInt(lstmHiddenDim) : null,
                     vocab_size: parseInt(vocabSize),
                     max_message_length: parseInt(maxMessageLength),
                     temperature: parseFloat(temperature),

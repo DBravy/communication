@@ -948,7 +948,8 @@ def main():
         embedding_dim=config.EMBEDDING_DIM,
         hidden_dim=config.HIDDEN_DIM,
         latent_dim=config.LATENT_DIM,
-        num_conv_layers=num_conv_layers
+        num_conv_layers=num_conv_layers,
+        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
     )
     
     # Load pretrained encoder if available and enabled
@@ -973,7 +974,8 @@ def main():
         num_classes=num_classes,  # For puzzle_classification task
         receiver_gets_input_puzzle=receiver_gets_input_puzzle,
         use_stop_token=use_stop_token,
-        stop_token_id=stop_token_id
+        stop_token_id=stop_token_id,
+        lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
     ).to(device)
     
     # Freeze encoder if configured

@@ -115,6 +115,8 @@ training_state = {
     'hidden_dim': getattr(config, 'HIDDEN_DIM', 128),
     'latent_dim': getattr(config, 'LATENT_DIM', 128),
     'num_conv_layers': getattr(config, 'NUM_CONV_LAYERS', 3),
+    'encoder_conv_channels': getattr(config, 'ENCODER_CONV_CHANNELS', None),  # list[int] or int or None
+    'lstm_hidden_dim': getattr(config, 'LSTM_HIDDEN_DIM', None),  # None => default to hidden_dim in model
     # Communication protocol
     'vocab_size': getattr(config, 'VOCAB_SIZE', 100),
     'max_message_length': getattr(config, 'MAX_MESSAGE_LENGTH', 3),
@@ -624,7 +626,8 @@ def pretrain_worker():
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=training_state['hidden_dim'],
             latent_dim=training_state['latent_dim'],
-            num_conv_layers=training_state['num_conv_layers']
+            num_conv_layers=training_state['num_conv_layers'],
+            conv_channels=training_state.get('encoder_conv_channels', None)
         )
         
         # PRETRAINING STEP 1: Optionally load a checkpoint to CONTINUE pretraining
@@ -1088,7 +1091,8 @@ def train_worker():
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=training_state['hidden_dim'],
             latent_dim=training_state['latent_dim'],
-            num_conv_layers=training_state['num_conv_layers']
+            num_conv_layers=training_state['num_conv_layers'],
+            conv_channels=training_state.get('encoder_conv_channels', None)
         )
         
         # MAIN TRAINING STEP 1: Optionally load pretrained encoder from Step 1 (pretraining)
@@ -1131,7 +1135,8 @@ def train_worker():
             num_classes=num_classes,
             receiver_gets_input_puzzle=receiver_gets_input_puzzle,
             use_stop_token=use_stop_token,
-            stop_token_id=stop_token_id
+            stop_token_id=stop_token_id,
+            lstm_hidden_dim=training_state.get('lstm_hidden_dim', None)
         ).to(device)
         
         # MAIN TRAINING STEP 2: Optionally freeze encoder weights during main training
@@ -1502,7 +1507,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     embedding_dim=config.EMBEDDING_DIM,
                     hidden_dim=config.HIDDEN_DIM,
                     latent_dim=config.LATENT_DIM,
-                    num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+                    num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+                    conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
                 )
                 
                 model = ARCAutoencoder(
@@ -1518,7 +1524,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
                     receiver_gets_input_puzzle=checkpoint_receiver_gets_input,
                     use_stop_token=checkpoint_use_stop_token,
-                    stop_token_id=stop_token_id
+                    stop_token_id=stop_token_id,
+                    lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
                 ).to(device)
                 
                 # Load checkpoint weights if provided
@@ -1861,7 +1868,8 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=config.HIDDEN_DIM,
             latent_dim=config.LATENT_DIM,
-            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+            conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
         )
         
         model = ARCAutoencoder(
@@ -2242,6 +2250,8 @@ def get_task_config():
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
         'num_conv_layers': training_state['num_conv_layers'],
+        'encoder_conv_channels': training_state['encoder_conv_channels'],
+        'lstm_hidden_dim': training_state['lstm_hidden_dim'],
         # Communication protocol
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
@@ -2298,6 +2308,18 @@ def set_task_config():
         training_state['latent_dim'] = int(data['latent_dim'])
     if 'num_conv_layers' in data:
         training_state['num_conv_layers'] = int(data['num_conv_layers'])
+    if 'encoder_conv_channels' in data:
+        # Accept int, list, or JSON string of list
+        ecc = data['encoder_conv_channels']
+        try:
+            # If it's a string that looks like JSON, parse it
+            if isinstance(ecc, str) and ecc.strip().startswith('['):
+                ecc = json.loads(ecc)
+        except Exception:
+            pass
+        training_state['encoder_conv_channels'] = ecc
+    if 'lstm_hidden_dim' in data:
+        training_state['lstm_hidden_dim'] = int(data['lstm_hidden_dim']) if data['lstm_hidden_dim'] is not None else None
     
     # Communication protocol
     if 'vocab_size' in data:
@@ -2345,6 +2367,8 @@ def set_task_config():
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
         'num_conv_layers': training_state['num_conv_layers'],
+        'encoder_conv_channels': training_state['encoder_conv_channels'],
+        'lstm_hidden_dim': training_state['lstm_hidden_dim'],
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
@@ -2788,7 +2812,8 @@ def solve_puzzle_route():
             num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
             receiver_gets_input_puzzle=receiver_gets_input_puzzle,
             use_stop_token=use_stop_token,
-            stop_token_id=stop_token_id
+            stop_token_id=stop_token_id,
+            lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
         ).to(device)
         
         # Load checkpoint with mapping for selection task checkpoints

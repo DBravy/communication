@@ -174,7 +174,8 @@ def main():
         embedding_dim=config.EMBEDDING_DIM,
         hidden_dim=config.HIDDEN_DIM,
         latent_dim=config.LATENT_DIM,
-        num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+        num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
     )
     model = ARCAutoencoder(
         encoder=encoder,
@@ -189,7 +190,8 @@ def main():
         num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
         receiver_gets_input_puzzle=receiver_gets_input_puzzle,
         use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
-        stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
+        stop_token_id=getattr(config, 'STOP_TOKEN_ID', None),
+        lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
     ).to(device)
     
     # Load checkpoint if provided
