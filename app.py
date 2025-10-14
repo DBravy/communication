@@ -2654,6 +2654,46 @@ def stop_batch_test():
     })
 
 
+@app.route('/batch_test_status', methods=['GET'])
+def batch_test_status():
+    """Get current batch test status."""
+    return jsonify({
+        'running': batch_test_state['running'],
+        'stop_requested': batch_test_state['stop_requested'],
+        'current_puzzle_index': batch_test_state.get('current_puzzle_index', 0),
+        'total_puzzles': batch_test_state.get('total_puzzles', 0),
+        'current_puzzle_id': batch_test_state.get('current_puzzle_id', None)
+    })
+
+
+@app.route('/reset_batch_test', methods=['POST'])
+def reset_batch_test():
+    """Force reset batch test state (use when stuck)."""
+    global batch_test_state, batch_test_thread
+    
+    # Force reset the state
+    was_running = batch_test_state['running']
+    batch_test_state['running'] = False
+    batch_test_state['stop_requested'] = False
+    batch_test_state['current_puzzle_index'] = 0
+    batch_test_state['total_puzzles'] = 0
+    batch_test_state['current_puzzle_id'] = None
+    batch_test_state['results'] = []
+    
+    # Clear the queue
+    while not batch_test_progress_queue.empty():
+        try:
+            batch_test_progress_queue.get_nowait()
+        except:
+            break
+    
+    return jsonify({
+        'status': 'reset',
+        'message': 'Batch test state has been reset',
+        'was_running': was_running
+    })
+
+
 @app.route('/solve_puzzle', methods=['POST'])
 def solve_puzzle_route():
     """Solve a puzzle using a finetuned model."""

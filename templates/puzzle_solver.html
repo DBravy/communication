@@ -684,8 +684,11 @@
                     </p>
                 </div>
                 <div class="input-group">
-                    <button class="btn-finetune-solve" id="batchTestBtn" onclick="startBatchTest()" style="flex: 1;">
+                    <button class="btn-finetune-solve" id="batchTestBtn" onclick="startBatchTest()" style="flex: 2;">
                         📊 Run Batch Test on All Puzzles
+                    </button>
+                    <button class="btn-primary" onclick="resetBatchTest()" style="background: #f59e0b; flex: 1;">
+                        🔄 Reset Batch Test
                     </button>
                 </div>
             </div>
@@ -785,6 +788,17 @@
             refreshPuzzles();
             attachConfigChangeListeners();
             updateConfigStatus();
+            checkBatchTestStatus(); // Check for stuck batch test
+        });
+        
+        // Clean up event sources on page unload
+        window.addEventListener('beforeunload', () => {
+            if (finetuningEventSource) {
+                finetuningEventSource.close();
+            }
+            if (batchTestEventSource) {
+                batchTestEventSource.close();
+            }
         });
         
         // Attach change listeners to all configuration inputs
@@ -892,6 +906,62 @@
                 document.getElementById('solveBtn').disabled = true;
                 document.getElementById('batchTestBtn').disabled = true;
             }
+        }
+        
+        function checkBatchTestStatus() {
+            // Check if there's a stuck batch test on page load
+            fetch('/batch_test_status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.running) {
+                        // There's a batch test that thinks it's running
+                        const message = data.current_puzzle_id ? 
+                            `A batch test appears to be stuck (puzzle ${data.current_puzzle_index}/${data.total_puzzles}: ${data.current_puzzle_id}).\n\nThis may happen if the page was refreshed or connection was lost.\n\nWould you like to reset the batch test state?` :
+                            `A batch test appears to be stuck in running state.\n\nThis may happen if the page was refreshed or connection was lost.\n\nWould you like to reset the batch test state?`;
+                        
+                        if (confirm(message)) {
+                            resetBatchTest();
+                        } else {
+                            // Show a warning that batch test is blocked
+                            showStatus('⚠️ Batch test is blocked - a previous test may be stuck. Use the Reset button if needed.', false);
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking batch test status:', error);
+                });
+        }
+        
+        function resetBatchTest() {
+            fetch('/reset_batch_test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'reset') {
+                    showStatus('✓ Batch test state has been reset', false);
+                    setTimeout(hideStatus, 3000);
+                    
+                    // Close any open event sources
+                    if (batchTestEventSource) {
+                        batchTestEventSource.close();
+                        batchTestEventSource = null;
+                    }
+                    
+                    // Hide progress UI
+                    hideProgress();
+                    document.getElementById('batchCurrentPuzzle').style.display = 'none';
+                    
+                    // Re-enable buttons
+                    updateConfigStatus();
+                } else {
+                    alert('Failed to reset batch test state');
+                }
+            })
+            .catch(error => {
+                alert(`Error resetting batch test: ${error.message}`);
+            });
         }
         
         function refreshCheckpoints() {
@@ -1178,7 +1248,14 @@
                 
                 finetuningEventSource.onerror = function(error) {
                     console.error('EventSource error:', error);
-                    finetuningEventSource.close();
+                    if (finetuningEventSource) {
+                        finetuningEventSource.close();
+                        finetuningEventSource = null;
+                    }
+                    
+                    showStatus('Lost connection to finetuning process. The process may have completed or errored.', false);
+                    hideProgress();
+                    updateConfigStatus();
                 };
             })
             .catch(error => {
@@ -1475,7 +1552,14 @@
                             early_stop_threshold: earlyStopThreshold
                         })
                     })
-                    .then(response => response.json())
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(errData => {
+                                throw new Error(errData.error || 'Failed to start batch test');
+                            });
+                        }
+                        return response.json();
+                    })
                     .then(data => {
                         if (data.error) {
                             showStatus(`Error starting batch test: ${data.error}`);
@@ -1559,12 +1643,47 @@
                         batchTestEventSource.onerror = function(error) {
                             console.error('Batch test EventSource error:', error);
                             batchTestEventSource.close();
+                            batchTestEventSource = null;
+                            
+                            // Check if the batch test is actually still running on the backend
+                            fetch('/batch_test_status')
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (!data.running) {
+                                        // Backend says it's not running, clean up UI
+                                        showStatus('Connection lost to batch test. The test may have completed or errored.', false);
+                                        hideProgress();
+                                        updateConfigStatus();
+                                        document.getElementById('batchCurrentPuzzle').style.display = 'none';
+                                    } else {
+                                        // Still running on backend but we lost connection
+                                        showStatus('⚠️ Lost connection to batch test. The test may still be running on the server. Use "Reset Batch Test" if you want to stop it.', false);
+                                        hideProgress();
+                                        updateConfigStatus();
+                                    }
+                                })
+                                .catch(err => {
+                                    showStatus('Connection error. Please check the status and reset if needed.', false);
+                                    hideProgress();
+                                    updateConfigStatus();
+                                });
                         };
                     })
                     .catch(error => {
-                        showStatus(`Error starting batch test: ${error.message}`);
-                        updateConfigStatus();
                         hideProgress();
+                        
+                        // Check if it's the "already in progress" error
+                        if (error.message.includes('already in progress')) {
+                            if (confirm(`A batch test is already in progress or stuck.\n\nWould you like to reset the batch test state and try again?`)) {
+                                resetBatchTest();
+                            } else {
+                                showStatus(`Error: ${error.message}. Use "Reset Batch Test" to clear the state.`, false);
+                                updateConfigStatus();
+                            }
+                        } else {
+                            showStatus(`Error starting batch test: ${error.message}`);
+                            updateConfigStatus();
+                        }
                     });
                 })
                 .catch(error => {
