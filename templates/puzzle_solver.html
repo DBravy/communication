@@ -782,10 +782,52 @@
         let configSaved = false;
         let savedConfig = null;
         
+        // Load saved configuration from localStorage on page load
+        function loadSavedConfiguration() {
+            const saved = localStorage.getItem('puzzleSolverConfig');
+            if (saved) {
+                try {
+                    savedConfig = JSON.parse(saved);
+                    configSaved = true;
+                    
+                    // Restore form values
+                    if (savedConfig.datasetVersion) {
+                        document.getElementById('datasetVersion').value = savedConfig.datasetVersion;
+                    }
+                    if (savedConfig.datasetSplit) {
+                        document.getElementById('datasetSplit').value = savedConfig.datasetSplit;
+                    }
+                    if (savedConfig.checkpoint) {
+                        document.getElementById('checkpointSelect').value = savedConfig.checkpoint;
+                    }
+                    if (savedConfig.epochs) {
+                        document.getElementById('finetuneEpochs').value = savedConfig.epochs;
+                    }
+                    if (savedConfig.lr) {
+                        document.getElementById('finetuneLR').value = savedConfig.lr;
+                    }
+                    if (savedConfig.receiverLR !== null && savedConfig.receiverLR !== undefined) {
+                        document.getElementById('finetuneReceiverLR').value = savedConfig.receiverLR;
+                    }
+                    if (savedConfig.batchSize) {
+                        document.getElementById('finetuneBatchSize').value = savedConfig.batchSize;
+                    }
+                    if (savedConfig.earlyStopThreshold) {
+                        document.getElementById('finetuneEarlyStop').value = savedConfig.earlyStopThreshold;
+                    }
+                    
+                    updateConfigStatus();
+                } catch (e) {
+                    console.error('Error loading saved configuration:', e);
+                }
+            }
+        }
+        
         // Load checkpoints and puzzles on page load
         window.addEventListener('load', () => {
             refreshCheckpoints();
             refreshPuzzles();
+            loadSavedConfiguration();
             attachConfigChangeListeners();
             updateConfigStatus();
             checkBatchTestStatus(); // Check for stuck batch test
@@ -848,6 +890,13 @@
                 batchSize: parseInt(document.getElementById('finetuneBatchSize').value) || 8,
                 earlyStopThreshold: parseFloat(document.getElementById('finetuneEarlyStop').value) || 99.0
             };
+            
+            // Persist to localStorage
+            try {
+                localStorage.setItem('puzzleSolverConfig', JSON.stringify(savedConfig));
+            } catch (e) {
+                console.error('Error saving configuration to localStorage:', e);
+            }
             
             configSaved = true;
             updateConfigStatus();
