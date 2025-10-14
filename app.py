@@ -1478,7 +1478,23 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                 )
                 
                 # Create model
-                receiver_gets_input_puzzle = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+                # IMPORTANT: Load checkpoint first to get the correct architecture params
+                checkpoint = None
+                checkpoint_vocab_size = config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None
+                checkpoint_max_length = config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None
+                checkpoint_receiver_gets_input = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+                checkpoint_use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
+                
+                if checkpoint_path and os.path.exists(checkpoint_path):
+                    checkpoint = torch.load(checkpoint_path, map_location=device)
+                    # Extract architecture params from checkpoint (use checkpoint values if available, otherwise fall back to config)
+                    checkpoint_vocab_size = checkpoint.get('vocab_size', checkpoint_vocab_size)
+                    checkpoint_max_length = checkpoint.get('max_message_length', checkpoint_max_length)
+                    checkpoint_receiver_gets_input = checkpoint.get('receiver_gets_input_puzzle', checkpoint_receiver_gets_input)
+                    checkpoint_use_stop_token = checkpoint.get('use_stop_token', checkpoint_use_stop_token)
+                
+                # Calculate stop_token_id based on vocab_size
+                stop_token_id = checkpoint_vocab_size if checkpoint_use_stop_token else None
                 
                 encoder = ARCEncoder(
                     num_colors=config.NUM_COLORS,
@@ -1490,8 +1506,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                 
                 model = ARCAutoencoder(
                     encoder=encoder,
-                    vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
-                    max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+                    vocab_size=checkpoint_vocab_size,
+                    max_length=checkpoint_max_length,
                     num_colors=config.NUM_COLORS,
                     embedding_dim=config.EMBEDDING_DIM,
                     hidden_dim=config.HIDDEN_DIM,
@@ -1499,14 +1515,13 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     bottleneck_type=config.BOTTLENECK_TYPE,
                     task_type='reconstruction',
                     num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-                    receiver_gets_input_puzzle=receiver_gets_input_puzzle,
-                    use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
-                    stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
+                    receiver_gets_input_puzzle=checkpoint_receiver_gets_input,
+                    use_stop_token=checkpoint_use_stop_token,
+                    stop_token_id=stop_token_id
                 ).to(device)
                 
-                # Load checkpoint if provided
-                if checkpoint_path and os.path.exists(checkpoint_path):
-                    checkpoint = torch.load(checkpoint_path, map_location=device)
+                # Load checkpoint weights if provided
+                if checkpoint is not None:
                     state_dict = checkpoint.get('model_state_dict', checkpoint)
                     
                     if 'receiver_reconstructor.symbol_embed.weight' in state_dict or \
@@ -1822,7 +1837,23 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
         )
         
         # Create model
-        receiver_gets_input_puzzle = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+        # IMPORTANT: Load checkpoint first to get the correct architecture params
+        checkpoint = None
+        checkpoint_vocab_size = config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None
+        checkpoint_max_length = config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None
+        checkpoint_receiver_gets_input = getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False)
+        checkpoint_use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
+        
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            # Extract architecture params from checkpoint (use checkpoint values if available, otherwise fall back to config)
+            checkpoint_vocab_size = checkpoint.get('vocab_size', checkpoint_vocab_size)
+            checkpoint_max_length = checkpoint.get('max_message_length', checkpoint_max_length)
+            checkpoint_receiver_gets_input = checkpoint.get('receiver_gets_input_puzzle', checkpoint_receiver_gets_input)
+            checkpoint_use_stop_token = checkpoint.get('use_stop_token', checkpoint_use_stop_token)
+        
+        # Calculate stop_token_id based on vocab_size
+        stop_token_id = checkpoint_vocab_size if checkpoint_use_stop_token else None
         
         encoder = ARCEncoder(
             num_colors=config.NUM_COLORS,
@@ -1834,8 +1865,8 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
         
         model = ARCAutoencoder(
             encoder=encoder,
-            vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
-            max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+            vocab_size=checkpoint_vocab_size,
+            max_length=checkpoint_max_length,
             num_colors=config.NUM_COLORS,
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=config.HIDDEN_DIM,
@@ -1843,14 +1874,13 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             bottleneck_type=config.BOTTLENECK_TYPE,
             task_type='reconstruction',
             num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-            receiver_gets_input_puzzle=receiver_gets_input_puzzle,
-            use_stop_token=getattr(config, 'USE_STOP_TOKEN', False),
-            stop_token_id=getattr(config, 'STOP_TOKEN_ID', None)
+            receiver_gets_input_puzzle=checkpoint_receiver_gets_input,
+            use_stop_token=checkpoint_use_stop_token,
+            stop_token_id=stop_token_id
         ).to(device)
         
-        # Load checkpoint if provided
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            checkpoint = torch.load(checkpoint_path, map_location=device)
+        # Load checkpoint weights if provided
+        if checkpoint is not None:
             state_dict = checkpoint.get('model_state_dict', checkpoint)
             
             # Handle selection task checkpoint mapping
@@ -2736,17 +2766,18 @@ def solve_puzzle_route():
         
         checkpoint = torch.load(checkpoint_path, map_location=device)
         
-        # Load receiver_gets_input_puzzle and use_stop_token from checkpoint if available, otherwise use config default
+        # Load architecture params from checkpoint if available, otherwise use config defaults
         receiver_gets_input_puzzle = checkpoint.get('receiver_gets_input_puzzle', getattr(config, 'RECEIVER_GETS_INPUT_PUZZLE', False))
         use_stop_token = checkpoint.get('use_stop_token', getattr(config, 'USE_STOP_TOKEN', False))
-        # Get vocab_size from checkpoint or config, then calculate stop_token_id
+        # Get vocab_size and max_length from checkpoint or config
         checkpoint_vocab_size = checkpoint.get('vocab_size', config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None)
+        checkpoint_max_length = checkpoint.get('max_message_length', config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None)
         stop_token_id = checkpoint_vocab_size if use_stop_token else None
         
         model = ARCAutoencoder(
             encoder=encoder,
-            vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
-            max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+            vocab_size=checkpoint_vocab_size,
+            max_length=checkpoint_max_length,
             num_colors=config.NUM_COLORS,
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=config.HIDDEN_DIM,
