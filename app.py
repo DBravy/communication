@@ -154,6 +154,7 @@ finetuning_thread = None
 finetuning_progress_queue = queue.Queue()
 finetuning_state = {
     'running': False,
+    'stop_requested': False,
     'puzzle_id': None,
     'epoch': 0,
     'total_epochs': 0,
@@ -166,6 +167,7 @@ batch_test_thread = None
 batch_test_progress_queue = queue.Queue()
 batch_test_state = {
     'running': False,
+    'stop_requested': False,
     'current_puzzle_index': 0,
     'total_puzzles': 0,
     'current_puzzle_id': None,
@@ -1418,6 +1420,7 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         batch_test_state['running'] = True
+        batch_test_state['stop_requested'] = False
         batch_test_state['total_puzzles'] = len(puzzle_ids)
         batch_test_state['current_puzzle_index'] = 0
         batch_test_state['results'] = []
@@ -1433,6 +1436,18 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
         data_path = get_data_path(dataset_version, dataset_split)
         
         for idx, puzzle_id in enumerate(puzzle_ids):
+            # Check if stop was requested before starting next puzzle
+            if batch_test_state['stop_requested']:
+                batch_test_progress_queue.put({
+                    'status': 'stopped',
+                    'message': 'Batch test stopped by user',
+                    'processed_puzzles': idx,
+                    'total_puzzles': len(puzzle_ids)
+                })
+                batch_test_state['running'] = False
+                batch_test_state['stop_requested'] = False
+                return
+            
             batch_test_state['current_puzzle_index'] = idx
             batch_test_state['current_puzzle_id'] = puzzle_id
             
@@ -1589,6 +1604,20 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     avg_loss = total_loss / len(train_loader)
                     accuracy = 100.0 * correct / total if total > 0 else 0.0
                     
+                    # Check if stop was requested
+                    if batch_test_state['stop_requested']:
+                        batch_test_progress_queue.put({
+                            'status': 'stopped',
+                            'message': 'Batch test stopped by user',
+                            'puzzle_id': puzzle_id,
+                            'puzzle_index': idx + 1,
+                            'processed_puzzles': idx + 1,
+                            'total_puzzles': len(puzzle_ids)
+                        })
+                        batch_test_state['running'] = False
+                        batch_test_state['stop_requested'] = False
+                        return
+                    
                     # Send epoch progress update (every 10 epochs or if early stopping)
                     if (epoch + 1) % 10 == 0 or epoch == 0 or accuracy >= early_stop_threshold:
                         batch_test_progress_queue.put({
@@ -1650,11 +1679,20 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                         output_actual = output_grid[:output_h, :output_w].numpy()
                         
                         input_batch = input_grid.unsqueeze(0).to(device)
-                        logits_list, _, _, _ = model(input_batch, [input_size], temperature=1.0)
+                        logits_list, _, messages, message_lengths = model(input_batch, [input_size], temperature=1.0)
                         
                         logits = logits_list[0]
                         pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
                         predicted = pred[:output_h, :output_w]
+                        
+                        # Capture messages if available (communication mode)
+                        message_data = None
+                        if messages is not None:
+                            message_seq = messages[0].cpu().tolist()
+                            message_data = {
+                                'symbols': message_seq,
+                                'length': int(message_lengths[0]) if message_lengths is not None else len(message_seq)
+                            }
                         
                         # Calculate accuracy
                         if predicted.shape == output_actual.shape:
@@ -1682,7 +1720,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                             'input_size': [int(input_h), int(input_w)],
                             'output_size': [int(output_h), int(output_w)],
                             'exact_match': bool(exact_match),
-                            'pixel_accuracy': float(pixel_accuracy)
+                            'pixel_accuracy': float(pixel_accuracy),
+                            'message': message_data  # Include message sequence
                         }
                 
                 avg_pixel_acc = total_pixel_acc / len(test_dataset) if len(test_dataset) > 0 else 0.0
@@ -1742,6 +1781,7 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
             'message': str(e)
         })
         batch_test_state['running'] = False
+        batch_test_state['stop_requested'] = False
 
 
 def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold=99.0, receiver_lr=None):
@@ -1754,6 +1794,7 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         finetuning_state['running'] = True
+        finetuning_state['stop_requested'] = False
         finetuning_state['puzzle_id'] = puzzle_id
         finetuning_state['total_epochs'] = epochs
         finetuning_state['epoch'] = 0
@@ -1920,6 +1961,21 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             finetuning_state['loss'] = avg_loss
             finetuning_state['accuracy'] = accuracy
             
+            # Check if stop was requested
+            if finetuning_state['stop_requested']:
+                finetuning_progress_queue.put({
+                    'status': 'stopped',
+                    'message': 'Finetuning stopped by user',
+                    'epoch': epoch + 1,
+                    'total_epochs': epochs,
+                    'train_loss': avg_loss,
+                    'train_acc': accuracy,
+                    'puzzle_id': puzzle_id
+                })
+                finetuning_state['running'] = False
+                finetuning_state['stop_requested'] = False
+                return
+            
             # Send progress update
             finetuning_progress_queue.put({
                 'status': 'progress',
@@ -1981,6 +2037,7 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             'message': str(e)
         })
         finetuning_state['running'] = False
+        finetuning_state['stop_requested'] = False
 
 
 @app.route('/')
@@ -2486,8 +2543,8 @@ def finetune_progress_stream():
                 progress = finetuning_progress_queue.get(timeout=1.0)
                 yield f"data: {json.dumps(progress)}\n\n"
                 
-                # Stop streaming if completed or errored
-                if progress.get('status') in ['completed', 'error', 'early_stopped']:
+                # Stop streaming if completed, errored, or stopped
+                if progress.get('status') in ['completed', 'error', 'early_stopped', 'stopped']:
                     break
             except queue.Empty:
                 # Send heartbeat
@@ -2497,6 +2554,22 @@ def finetune_progress_stream():
                 time.sleep(0.5)
     
     return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/stop_finetuning', methods=['POST'])
+def stop_finetuning():
+    """Request to stop the current finetuning process."""
+    global finetuning_state
+    
+    if not finetuning_state['running']:
+        return jsonify({'error': 'No finetuning in progress'}), 400
+    
+    finetuning_state['stop_requested'] = True
+    
+    return jsonify({
+        'status': 'stop_requested',
+        'message': 'Finetuning will stop after the current epoch'
+    })
 
 
 @app.route('/batch_test', methods=['POST'])
@@ -2552,8 +2625,8 @@ def batch_test_progress_stream():
                 progress = batch_test_progress_queue.get(timeout=1.0)
                 yield f"data: {json.dumps(progress)}\n\n"
                 
-                # Stop streaming if completed or errored
-                if progress.get('status') in ['completed', 'error']:
+                # Stop streaming if completed, errored, or stopped
+                if progress.get('status') in ['completed', 'error', 'stopped']:
                     break
             except queue.Empty:
                 # Send heartbeat
@@ -2563,6 +2636,22 @@ def batch_test_progress_stream():
                 time.sleep(0.5)
     
     return Response(generate(), mimetype='text/event-stream')
+
+
+@app.route('/stop_batch_test', methods=['POST'])
+def stop_batch_test():
+    """Request to stop the current batch test process."""
+    global batch_test_state
+    
+    if not batch_test_state['running']:
+        return jsonify({'error': 'No batch test in progress'}), 400
+    
+    batch_test_state['stop_requested'] = True
+    
+    return jsonify({
+        'status': 'stop_requested',
+        'message': 'Batch test will stop after the current epoch or puzzle'
+    })
 
 
 @app.route('/solve_puzzle', methods=['POST'])

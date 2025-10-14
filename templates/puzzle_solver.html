@@ -610,6 +610,14 @@
                     </div>
                 </div>
                 <div class="progress-text" id="progressText"></div>
+                <div style="margin-top: 15px; text-align: center;">
+                    <button id="stopFinetuneBtn" onclick="stopFinetuning()" style="display: none; background: #ef4444; color: white; padding: 10px 30px; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer;">
+                        ⏹ Stop Finetuning
+                    </button>
+                    <button id="stopBatchBtn" onclick="stopBatchTest()" style="display: none; background: #ef4444; color: white; padding: 10px 30px; font-size: 14px; font-weight: 600; border: none; border-radius: 6px; cursor: pointer;">
+                        ⏹ Stop Batch Test
+                    </button>
+                </div>
             </div>
         </div>
         
@@ -651,6 +659,15 @@
                         <div class="grid-container">
                             <div class="grid-label">PREDICTED OUTPUT</div>
                             <div id="batch-current-predicted" style="text-align: center;"></div>
+                        </div>
+                    </div>
+                    <div id="batch-current-message-section" style="margin-top: 20px; display: none;">
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 4px solid #667eea;">
+                            <div style="font-size: 14px; font-weight: 600; color: #4a5568; margin-bottom: 10px;">
+                                📨 Message Sequence (Sender → Receiver)
+                            </div>
+                            <div id="batch-current-message-content" style="font-family: 'Courier New', monospace; font-size: 13px; color: #1f2937; word-break: break-all; line-height: 1.6;">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -762,12 +779,69 @@
             hideProgress();
         }
         
-        function showProgress() {
+        function showProgress(type = 'finetune') {
             document.getElementById('progressContainer').style.display = 'block';
+            // Show appropriate stop button
+            if (type === 'finetune') {
+                document.getElementById('stopFinetuneBtn').style.display = 'inline-block';
+                document.getElementById('stopBatchBtn').style.display = 'none';
+            } else if (type === 'batch') {
+                document.getElementById('stopFinetuneBtn').style.display = 'none';
+                document.getElementById('stopBatchBtn').style.display = 'inline-block';
+            }
         }
         
         function hideProgress() {
             document.getElementById('progressContainer').style.display = 'none';
+            // Hide both stop buttons
+            document.getElementById('stopFinetuneBtn').style.display = 'none';
+            document.getElementById('stopBatchBtn').style.display = 'none';
+        }
+        
+        function stopFinetuning() {
+            if (!confirm('Are you sure you want to stop finetuning? Progress will be saved at the current epoch.')) {
+                return;
+            }
+            
+            fetch('/stop_finetuning', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(`Error: ${data.error}`);
+                } else {
+                    showStatus('⏹ Stopping finetuning... Please wait for current epoch to finish.', false);
+                    document.getElementById('stopFinetuneBtn').disabled = true;
+                }
+            })
+            .catch(error => {
+                alert(`Error stopping finetuning: ${error.message}`);
+            });
+        }
+        
+        function stopBatchTest() {
+            if (!confirm('Are you sure you want to stop batch testing? Progress will be saved for completed puzzles.')) {
+                return;
+            }
+            
+            fetch('/stop_batch_test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert(`Error: ${data.error}`);
+                } else {
+                    showStatus('⏹ Stopping batch test... Please wait for current epoch to finish.', false);
+                    document.getElementById('stopBatchBtn').disabled = true;
+                }
+            })
+            .catch(error => {
+                alert(`Error stopping batch test: ${error.message}`);
+            });
         }
         
         function updateProgress(epoch, totalEpochs, loss, accuracy) {
@@ -814,7 +888,7 @@
             }
             
             showStatus(`Step 1/2: Starting finetuning on puzzle ${currentPuzzleId}...`, true);
-            showProgress();
+            showProgress('finetune');
             
             // Disable buttons during process
             document.getElementById('finetuneSolveBtn').disabled = true;
@@ -886,6 +960,12 @@
                         showStatus(`✓ Finetuning completed! Loss: ${progress.train_loss.toFixed(4)}, Accuracy: ${progress.train_acc.toFixed(2)}%`, false);
                         // Proceed to solving
                         setTimeout(() => proceedToSolving(progress), 1000);
+                    } else if (progress.status === 'stopped') {
+                        showStatus(`⏹ ${progress.message}`, false);
+                        document.getElementById('finetuneSolveBtn').disabled = false;
+                        document.getElementById('solveBtn').disabled = false;
+                        hideProgress();
+                        finetuningEventSource.close();
                     } else if (progress.status === 'error') {
                         showStatus(`Error during finetuning: ${progress.message}`);
                         document.getElementById('finetuneSolveBtn').disabled = false;
@@ -1172,7 +1252,7 @@
                     document.getElementById('solveBtn').disabled = true;
                     
                     showStatus(`Starting batch test on ${puzzleIds.length} puzzles...`, true);
-                    showProgress();
+                    showProgress('batch');
                     
                     // Start batch test
                     fetch('/batch_test', {
@@ -1256,6 +1336,17 @@
                                 document.getElementById('batchTestBtn').disabled = false;
                                 document.getElementById('finetuneSolveBtn').disabled = false;
                                 document.getElementById('solveBtn').disabled = false;
+                            } else if (progress.status === 'stopped') {
+                                showStatus(`⏹ ${progress.message} - Processed ${progress.processed_puzzles}/${progress.total_puzzles} puzzles`, false);
+                                hideProgress();
+                                if (batchResults.length > 0) {
+                                    displayBatchResults(batchResults);
+                                }
+                                document.getElementById('batchCurrentPuzzle').style.display = 'none';
+                                document.getElementById('batchTestBtn').disabled = false;
+                                document.getElementById('finetuneSolveBtn').disabled = false;
+                                document.getElementById('solveBtn').disabled = false;
+                                batchTestEventSource.close();
                             } else if (progress.status === 'error') {
                                 showStatus(`Error during batch test: ${progress.message}`);
                                 hideProgress();
@@ -1463,6 +1554,37 @@
             renderGrid(lastExample.input, 'batch-current-input');
             renderGrid(lastExample.target, 'batch-current-target');
             renderGrid(lastExample.predicted, 'batch-current-predicted');
+            
+            // Display message sequence if available (communication mode)
+            const messageSection = document.getElementById('batch-current-message-section');
+            const messageContent = document.getElementById('batch-current-message-content');
+            
+            if (lastExample.message && lastExample.message.symbols) {
+                const symbols = lastExample.message.symbols;
+                const actualLength = lastExample.message.length || symbols.length;
+                
+                // Format message with visual indicators
+                let formattedMessage = symbols.map((sym, idx) => {
+                    const isAfterStop = idx >= actualLength;
+                    const style = isAfterStop ? 'color: #9ca3af; text-decoration: line-through;' : 'color: #1f2937; font-weight: 600;';
+                    return `<span style="${style}" title="Position ${idx}, Symbol ${sym}">${sym}</span>`;
+                }).join(' ');
+                
+                messageContent.innerHTML = `
+                    <div style="margin-bottom: 8px;">
+                        <strong>Length:</strong> ${actualLength} / ${symbols.length} symbols
+                    </div>
+                    <div style="background: white; padding: 10px; border-radius: 4px; border: 1px solid #e5e7eb;">
+                        ${formattedMessage}
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11px; color: #6b7280;">
+                        ${actualLength < symbols.length ? '(Gray symbols are padding after stop token)' : ''}
+                    </div>
+                `;
+                messageSection.style.display = 'block';
+            } else {
+                messageSection.style.display = 'none';
+            }
             
             // Scroll to current puzzle
             document.getElementById('batchCurrentPuzzle').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
