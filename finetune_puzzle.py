@@ -136,6 +136,7 @@ def main():
     parser.add_argument('--checkpoint', type=str, default=None, help='Path to pretrained checkpoint')
     parser.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate')
+    parser.add_argument('--receiver_lr', type=float, default=None, help='Learning rate for receiver (if None, uses same as --lr)')
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size')
     parser.add_argument('--save_dir', type=str, default='puzzle_checkpoints', help='Directory to save finetuned models')
     
@@ -250,7 +251,31 @@ def main():
     
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    
+    # Use separate learning rate for receiver if specified
+    if args.receiver_lr is not None and hasattr(model, 'receiver'):
+        # Separate receiver parameters from other parameters
+        receiver_params = []
+        other_params = []
+        
+        for name, param in model.named_parameters():
+            if 'receiver' in name:
+                receiver_params.append(param)
+            else:
+                other_params.append(param)
+        
+        # Create optimizer with parameter groups
+        optimizer = optim.Adam([
+            {'params': other_params, 'lr': args.lr},
+            {'params': receiver_params, 'lr': args.receiver_lr}
+        ])
+        print(f'Using separate learning rates: base={args.lr}, receiver={args.receiver_lr}')
+    else:
+        # Standard optimizer with single learning rate
+        optimizer = optim.Adam(model.parameters(), lr=args.lr)
+        if args.receiver_lr is not None:
+            print(f'Warning: receiver_lr specified but model has no receiver, using single lr={args.lr}')
+    
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=50, verbose=True
     )
@@ -259,7 +284,10 @@ def main():
     print(f'\nFinetuning on puzzle {args.puzzle_id}...')
     print(f'Training examples: {len(train_dataset)}')
     print(f'Epochs: {args.epochs}')
-    print(f'Learning rate: {args.lr}')
+    if args.receiver_lr is not None and hasattr(model, 'receiver'):
+        print(f'Learning rate: {args.lr} (base), {args.receiver_lr} (receiver)')
+    else:
+        print(f'Learning rate: {args.lr}')
     print(f'Early stopping: Will stop if accuracy reaches 99%')
     
     best_loss = float('inf')

@@ -1408,7 +1408,7 @@ def train_worker():
         metrics_queue.put({'status': 'error', 'message': str(e)})
 
 
-def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold):
+def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold, receiver_lr=None):
     """Background batch testing worker - finetunes and solves multiple puzzles."""
     global batch_test_state
     
@@ -1514,7 +1514,27 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                             encoder.load_state_dict(checkpoint['encoder_state_dict'])
                 
                 criterion = nn.CrossEntropyLoss()
-                optimizer = optim.Adam(model.parameters(), lr=lr)
+                
+                # Use separate learning rate for receiver if specified
+                if receiver_lr is not None and hasattr(model, 'receiver'):
+                    # Separate receiver parameters from other parameters
+                    receiver_params = []
+                    other_params = []
+                    
+                    for name, param in model.named_parameters():
+                        if 'receiver' in name:
+                            receiver_params.append(param)
+                        else:
+                            other_params.append(param)
+                    
+                    # Create optimizer with parameter groups
+                    optimizer = optim.Adam([
+                        {'params': other_params, 'lr': lr},
+                        {'params': receiver_params, 'lr': receiver_lr}
+                    ])
+                else:
+                    # Standard optimizer with single learning rate
+                    optimizer = optim.Adam(model.parameters(), lr=lr)
                 
                 best_loss = float('inf')
                 best_acc = 0.0
@@ -1724,7 +1744,7 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
         batch_test_state['running'] = False
 
 
-def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold=99.0):
+def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold=99.0, receiver_lr=None):
     """Background finetuning worker with progress reporting."""
     global finetuning_state
     
@@ -1815,7 +1835,27 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
                     encoder.load_state_dict(checkpoint['encoder_state_dict'])
         
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        
+        # Use separate learning rate for receiver if specified
+        if receiver_lr is not None and hasattr(model, 'receiver'):
+            # Separate receiver parameters from other parameters
+            receiver_params = []
+            other_params = []
+            
+            for name, param in model.named_parameters():
+                if 'receiver' in name:
+                    receiver_params.append(param)
+                else:
+                    other_params.append(param)
+            
+            # Create optimizer with parameter groups
+            optimizer = optim.Adam([
+                {'params': other_params, 'lr': lr},
+                {'params': receiver_params, 'lr': receiver_lr}
+            ])
+        else:
+            # Standard optimizer with single learning rate
+            optimizer = optim.Adam(model.parameters(), lr=lr)
         
         best_loss = float('inf')
         best_acc = 0.0
@@ -2405,6 +2445,7 @@ def finetune_puzzle_route():
     checkpoint_path = data.get('checkpoint')
     epochs = data.get('epochs', 500)
     lr = data.get('lr', 1e-4)
+    receiver_lr = data.get('receiver_lr', None)
     batch_size = data.get('batch_size', 8)
     early_stop_threshold = data.get('early_stop_threshold', 99.0)
     dataset_version = data.get('dataset_version', 'V2')
@@ -2421,7 +2462,7 @@ def finetune_puzzle_route():
         # Start finetuning in background thread
         finetuning_thread = threading.Thread(
             target=finetune_worker,
-            args=(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold)
+            args=(puzzle_id, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold, receiver_lr)
         )
         finetuning_thread.start()
         
@@ -2471,6 +2512,7 @@ def batch_test_route():
     checkpoint_path = data.get('checkpoint')
     epochs = data.get('epochs', 500)
     lr = data.get('lr', 1e-4)
+    receiver_lr = data.get('receiver_lr', None)
     batch_size = data.get('batch_size', 8)
     early_stop_threshold = data.get('early_stop_threshold', 99.0)
     dataset_version = data.get('dataset_version', 'V2')
@@ -2487,7 +2529,7 @@ def batch_test_route():
         # Start batch test in background thread
         batch_test_thread = threading.Thread(
             target=batch_test_worker,
-            args=(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold)
+            args=(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold, receiver_lr)
         )
         batch_test_thread.start()
         
