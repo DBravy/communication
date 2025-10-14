@@ -2775,6 +2775,26 @@ def solve_puzzle_route():
         # Load test dataset
         test_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='test')
         
+        # Load training examples for display
+        try:
+            train_dataset = ARCSinglePuzzleDataset(data_path, puzzle_id, split='train')
+            train_examples = []
+            for i in range(len(train_dataset)):
+                input_grid, input_size, output_grid, output_size = train_dataset[i]
+                input_h, input_w = input_size
+                output_h, output_w = output_size
+                input_actual = input_grid[:input_h, :input_w].numpy()
+                output_actual = output_grid[:output_h, :output_w].numpy()
+                train_examples.append({
+                    'input': input_actual.tolist(),
+                    'output': output_actual.tolist(),
+                    'input_size': list(input_size),
+                    'output_size': list(output_size)
+                })
+        except Exception as e:
+            print(f"Warning: Could not load training examples: {e}")
+            train_examples = []
+        
         # Load model
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
@@ -2861,6 +2881,8 @@ def solve_puzzle_route():
         results = {
             'puzzle_id': puzzle_id,
             'num_test_examples': len(test_dataset),
+            'num_train_examples': len(train_examples),
+            'train_examples': train_examples,
             'predictions': []
         }
         

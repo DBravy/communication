@@ -314,6 +314,83 @@
             border: 1px solid rgba(0,0,0,0.05);
         }
         
+        .train-examples-section {
+            padding: 20px 30px;
+            background: #f0f9ff;
+            border-bottom: 2px solid #d0d9ff;
+        }
+        
+        .train-examples-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 15px;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        
+        .train-example-pair {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .train-example-header {
+            font-size: 13px;
+            font-weight: 600;
+            color: #667eea;
+            min-width: 80px;
+            flex-shrink: 0;
+        }
+        
+        .train-grids {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: nowrap;
+        }
+        
+        .train-grid-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .train-grid-label {
+            font-size: 11px;
+            color: #6b7280;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .arc-grid-small {
+            display: inline-grid;
+            gap: 1px;
+            padding: 6px;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 4px;
+            max-width: 100%;
+        }
+        
+        .grid-cell-small {
+            width: 14px;
+            height: 14px;
+            border: 0.5px solid rgba(0,0,0,0.08);
+        }
+        
+        .arrow-separator {
+            font-size: 18px;
+            color: #667eea;
+            font-weight: bold;
+            margin: 0 5px;
+        }
+        
         .message-display {
             margin-top: 15px;
             padding: 12px;
@@ -712,6 +789,16 @@
                     </button>
                 </div>
             </div>
+        </div>
+        
+        <div class="train-examples-section" id="trainExamplesSection" style="display: none;">
+            <h3 style="font-size: 18px; font-weight: 600; color: #1f2937; margin-bottom: 5px;">
+                Example Pairs (Training Examples)
+            </h3>
+            <p style="font-size: 13px; color: #6b7280; margin-bottom: 15px;">
+                These are the examples the puzzle provides. The model learns the pattern from these pairs.
+            </p>
+            <div class="train-examples-container" id="trainExamplesContainer"></div>
         </div>
         
         <div class="results-section" id="resultsSection" style="display: none;">
@@ -1192,6 +1279,7 @@
             
             // Clear previous results
             document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('trainExamplesSection').style.display = 'none';
             
             showStatus(`Puzzle ${puzzleId} loaded. ${configSaved ? 'Ready to solve.' : 'Please save configuration to proceed.'}`);
         }
@@ -1437,10 +1525,81 @@
             container.appendChild(gridElement);
         }
         
+        function renderSmallGrid(gridData) {
+            const rows = gridData.length;
+            const cols = gridData[0].length;
+            
+            const gridElement = document.createElement('div');
+            gridElement.className = 'arc-grid-small';
+            gridElement.style.gridTemplateColumns = `repeat(${cols}, 14px)`;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell-small';
+                    const colorValue = gridData[r][c];
+                    cell.style.backgroundColor = ARC_COLORS[colorValue] || '#ffffff';
+                    gridElement.appendChild(cell);
+                }
+            }
+            
+            return gridElement;
+        }
+        
+        function displayTrainingExamples(trainExamples) {
+            const section = document.getElementById('trainExamplesSection');
+            const container = document.getElementById('trainExamplesContainer');
+            
+            if (!trainExamples || trainExamples.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            
+            section.style.display = 'block';
+            container.innerHTML = '';
+            
+            trainExamples.forEach((example, idx) => {
+                const pairDiv = document.createElement('div');
+                pairDiv.className = 'train-example-pair';
+                
+                pairDiv.innerHTML = `
+                    <div class="train-example-header">Example ${idx + 1}</div>
+                    <div class="train-grids">
+                        <div class="train-grid-wrapper">
+                            <div class="train-grid-label">IN</div>
+                            <div id="train-input-${idx}"></div>
+                        </div>
+                        <div class="arrow-separator">→</div>
+                        <div class="train-grid-wrapper">
+                            <div class="train-grid-label">OUT</div>
+                            <div id="train-output-${idx}"></div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(pairDiv);
+                
+                // Render grids after adding to DOM
+                setTimeout(() => {
+                    const inputContainer = document.getElementById(`train-input-${idx}`);
+                    const outputContainer = document.getElementById(`train-output-${idx}`);
+                    if (inputContainer && outputContainer) {
+                        inputContainer.appendChild(renderSmallGrid(example.input));
+                        outputContainer.appendChild(renderSmallGrid(example.output));
+                    }
+                }, 0);
+            });
+        }
+        
         function displayResults(results) {
             const resultsSection = document.getElementById('resultsSection');
             const puzzleInfo = document.getElementById('puzzleInfo');
             const testExamples = document.getElementById('testExamples');
+            
+            // Display training examples if available
+            if (results.train_examples) {
+                displayTrainingExamples(results.train_examples);
+            }
             
             resultsSection.style.display = 'block';
             
@@ -1453,6 +1612,10 @@
                     <div class="info-item">
                         <div class="info-label">Puzzle ID</div>
                         <div class="info-value">${results.puzzle_id}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Training Examples</div>
+                        <div class="info-value">${results.num_train_examples || 0}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Test Examples</div>
@@ -1571,6 +1734,7 @@
                     
                     // Hide single puzzle results
                     document.getElementById('resultsSection').style.display = 'none';
+                    document.getElementById('trainExamplesSection').style.display = 'none';
                     
                     // Clear previous batch results
                     batchResults = [];
