@@ -708,11 +708,18 @@ class ARCAutoencoder(nn.Module):
             raise ValueError(f"Unknown bottleneck_type: {bottleneck_type}")
     
     def forward(self, x, sizes, temperature=1.0, candidates_list=None, candidates_sizes_list=None, 
-                target_indices=None, labels=None):
+                target_indices=None, labels=None, output_sizes=None):  # <--- Add output_sizes parameter
         """
-        FIXED: Now properly passes soft messages to receivers.
+        Args:
+            x: Input grids
+            sizes: Input sizes
+            output_sizes: Optional output sizes (for input->output transformation tasks)
+                        If None, uses sizes (self-supervised reconstruction)
         """
         B = x.shape[0]
+        
+        # Use output_sizes if provided, otherwise use input sizes (self-supervised)
+        target_sizes = output_sizes if output_sizes is not None else sizes
         
         if self.task_type == 'reconstruction':
             if self.bottleneck_type == 'communication':
@@ -725,26 +732,26 @@ class ARCAutoencoder(nn.Module):
                     single_message = messages[i:i+1]
                     soft_single = soft_messages[i:i+1]
                     single_length = message_lengths[i:i+1]
-                    actual_h, actual_w = sizes[i]
+                    target_h, target_w = target_sizes[i]  # <--- Use target size, not input size
                     
                     # Pass input puzzle to receiver if configured
                     if self.receiver_gets_input_puzzle:
                         input_puzzle = x[i:i+1]
-                        input_size = sizes[i]
+                        input_size = sizes[i]  # Input size for context
                         logits = self.receiver(single_message, 
-                                              target_size=(actual_h, actual_w),
-                                              soft_message=soft_single,
-                                              input_puzzle=input_puzzle,
-                                              input_size=input_size,
-                                              message_lengths=single_length)
+                                            target_size=(target_h, target_w),  # <--- Correct target size
+                                            soft_message=soft_single,
+                                            input_puzzle=input_puzzle,
+                                            input_size=input_size,
+                                            message_lengths=single_length)
                     else:
                         logits = self.receiver(single_message, 
-                                              target_size=(actual_h, actual_w),
-                                              soft_message=soft_single,
-                                              message_lengths=single_length)
+                                            target_size=(target_h, target_w),  # <--- Correct target size
+                                            soft_message=soft_single,
+                                            message_lengths=single_length)
                     
                     logits_list.append(logits)
-                    actual_sizes.append((actual_h, actual_w))
+                    actual_sizes.append((target_h, target_w)) 
                 
                 return logits_list, actual_sizes, messages, message_lengths
                 

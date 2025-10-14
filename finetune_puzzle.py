@@ -41,8 +41,8 @@ def train_epoch(model, dataloader, optimizer, criterion, device):
         optimizer.zero_grad()
         
         # Forward pass
-        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
-        
+        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0, 
+                                    output_sizes=output_sizes)        
         # Compute loss for each sample
         batch_loss = 0
         batch_correct = 0
@@ -93,7 +93,8 @@ def validate(model, dataloader, criterion, device):
             output_grids = output_grids.to(device)
             
             # Forward pass
-            logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
+            logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0,
+                                        output_sizes=output_sizes)
             
             # Compute loss for each sample
             batch_loss = 0

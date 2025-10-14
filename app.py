@@ -1248,7 +1248,8 @@ def train_worker():
                     # Reconstruction task
                     if use_input_output_pairs:
                         # Use input to generate message, reconstruct output
-                        model_output = model(input_grids, input_sizes, temperature=training_state['temperature'])
+                        model_output = model(input_grids, input_sizes, temperature=training_state['temperature'],
+                                            output_sizes=output_sizes)  
                         if len(model_output) == 4:  # with message_lengths
                             logits_list, actual_sizes, messages, message_lengths = model_output
                         else:  # autoencoder mode
@@ -1583,8 +1584,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                         output_grids = output_grids.to(device)
                         
                         optimizer.zero_grad()
-                        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
-                        
+                        logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0,
+                                                    output_sizes=output_sizes)                        
                         batch_loss = 0
                         batch_correct = 0
                         batch_total = 0
@@ -1694,8 +1695,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                         output_actual = output_grid[:output_h, :output_w].numpy()
                         
                         input_batch = input_grid.unsqueeze(0).to(device)
-                        logits_list, _, messages, message_lengths = model(input_batch, [input_size], temperature=1.0)
-                        
+                        logits_list, _, messages, message_lengths = model(input_batch, [input_size], temperature=1.0,
+                                                                        output_sizes=[output_size])                        
                         logits = logits_list[0]
                         pred = logits.argmax(dim=1).squeeze(0).cpu().numpy()
                         predicted = pred[:output_h, :output_w]
@@ -1947,8 +1948,8 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
                 optimizer.zero_grad()
                 
                 # Forward pass
-                logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0)
-                
+                logits_list, _, _, _ = model(input_grids, input_sizes, temperature=1.0,
+                                            output_sizes=output_sizes)                
                 # Compute loss
                 batch_loss = 0
                 batch_correct = 0
@@ -2851,8 +2852,8 @@ def solve_puzzle_route():
             # Generate prediction
             with torch.no_grad():
                 input_batch = input_grid.unsqueeze(0).to(device)
-                model_output = model(input_batch, [input_size], temperature=1.0)
-                
+                model_output = model(input_batch, [input_size], temperature=1.0,
+                                    output_sizes=[output_size])                
                 # Unpack based on number of return values
                 if len(model_output) == 4:  # with message_lengths
                     logits_list, _, messages, message_lengths = model_output
