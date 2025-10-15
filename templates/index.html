@@ -1160,7 +1160,7 @@
             container.appendChild(gridElement);
         }
         
-        function displayReconstructions(reconstructions) {
+        function displayReconstructions(reconstructions, epoch, batch) {
             const container = document.getElementById('resultsContainer');
             container.innerHTML = '';
             
@@ -1178,6 +1178,13 @@
                     </div>
                 ` : '';
                 
+                // Add epoch/batch info if available
+                const epochBatchHTML = (epoch !== undefined && batch !== undefined) ? `
+                    <span style="font-size: 10px; color: #9ca3af; margin-left: auto; padding: 2px 8px;">
+                        Epoch ${epoch} / Batch ${batch}
+                    </span>
+                ` : '';
+                
                 resultDiv.innerHTML = `
                     <div class="pair-header" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
                         <span class="pair-title">Sample ${idx + 1}</span>
@@ -1185,6 +1192,7 @@
                             ${recon.accuracy.toFixed(1)}% Accurate
                         </span>
                         ${messageHTML}
+                        ${epochBatchHTML}
                     </div>
                     <div class="grids-container">
                         <div class="grid-wrapper">
@@ -1207,7 +1215,7 @@
             });
         }
         
-        function displaySelections(selections) {
+        function displaySelections(selections, epoch, batch) {
             const container = document.getElementById('resultsContainer');
             container.innerHTML = '';
             
@@ -1223,6 +1231,13 @@
                     <div class="message-display" style="margin: 0; padding: 8px 12px; flex-shrink: 0;">
                         Symbol Sequence: [${sel.message.join(', ')}]
                     </div>
+                ` : '';
+                
+                // Add epoch/batch info if available
+                const epochBatchHTML = (epoch !== undefined && batch !== undefined) ? `
+                    <span style="font-size: 10px; color: #9ca3af; margin-left: auto; padding: 2px 8px;">
+                        Epoch ${epoch} / Batch ${batch}
+                    </span>
                 ` : '';
                 
                 let candidatesHTML = '';
@@ -1250,6 +1265,7 @@
                             ${selectionText}
                         </span>
                         ${messageHTML}
+                        ${epochBatchHTML}
                     </div>
                     <div class="grid-wrapper" style="margin-bottom: 15px;">
                         <div class="grid-label">TARGET GRID (${sel.actual_size[0]}×${sel.actual_size[1]})</div>
@@ -1274,12 +1290,12 @@
             });
         }
         
-        function displayResults(results) {
+        function displayResults(results, epoch, batch) {
             if (results && results.length > 0) {
                 if (results[0].task_type === 'selection') {
-                    displaySelections(results);
+                    displaySelections(results, epoch, batch);
                 } else {
-                    displayReconstructions(results);
+                    displayReconstructions(results, epoch, batch);
                 }
             }
         }
@@ -1716,7 +1732,7 @@
             }
             
             if (message.type === 'reconstructions') {
-                displayResults(message.data);
+                displayResults(message.data, message.epoch, message.batch);
             }
         };
         

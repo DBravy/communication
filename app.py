@@ -1383,7 +1383,11 @@ def train_worker():
                         results = get_classification_preview(model, input_grids, input_sizes, device)
                     else:
                         results = get_reconstructions(model, input_grids, input_sizes, device, num_samples=1)
-                    reconstructions_queue.put(results)
+                    reconstructions_queue.put({
+                        'results': results,
+                        'epoch': epoch + 1,
+                        'batch': batch_idx + 1
+                    })
                     
                     # Validation batch visualization
                     for val_batch in val_loader:
@@ -1405,7 +1409,11 @@ def train_worker():
                                 val_input_grids, val_input_sizes = val_batch
                                 val_input_grids = val_input_grids.to(device)
                             results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
-                        reconstructions_queue.put(results)
+                        reconstructions_queue.put({
+                            'results': results,
+                            'epoch': epoch + 1,
+                            'batch': batch_idx + 1
+                        })
                         break
                         
         training_state['running'] = False
@@ -2523,8 +2531,13 @@ def stream():
             
             # Check for reconstructions
             try:
-                recons = reconstructions_queue.get_nowait()
-                yield f"data: {json.dumps({'type': 'reconstructions', 'data': recons})}\n\n"
+                recons_data = reconstructions_queue.get_nowait()
+                # Handle both old format (just results) and new format (dict with epoch/batch)
+                if isinstance(recons_data, dict) and 'results' in recons_data:
+                    yield f"data: {json.dumps({'type': 'reconstructions', 'data': recons_data['results'], 'epoch': recons_data.get('epoch'), 'batch': recons_data.get('batch')})}\n\n"
+                else:
+                    # Legacy format for backwards compatibility
+                    yield f"data: {json.dumps({'type': 'reconstructions', 'data': recons_data})}\n\n"
             except queue.Empty:
                 pass
             
