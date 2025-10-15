@@ -9,8 +9,9 @@ from tqdm import tqdm
 
 import config
 from dataset import ARCDataset, collate_fn, collate_fn_puzzle_classification
-from model import ARCEncoder, ARCAutoencoder
+from model import ARCEncoder, ARCAutoencoder, ARCPuzzleSolver
 from live_plotter import LivePlotter
+from puzzle_training_dataset import ARCPuzzleTrainingDataset, collate_fn_puzzle_training
 
 
 def visualize_grid(grid, title="Grid"):
@@ -839,6 +840,135 @@ def cleanup_old_checkpoints(save_dir, keep_last=3):
         except Exception as e:
             print(f'  Warning: Could not remove {checkpoint_path}: {e}')
 
+def train_epoch_puzzle_solving(model, dataloader, optimizer, criterion, device, temperature, plotter=None):
+    """Training epoch for puzzle solving task."""
+    model.train()
+    total_loss = 0
+    correct_pixels = 0
+    total_pixels = 0
+    
+    pbar = tqdm(dataloader, desc='Training Puzzles')
+    for batch_idx, puzzle_data in enumerate(pbar):
+        (train_inputs, train_input_sizes, train_outputs, train_output_sizes,
+         test_inputs, test_input_sizes, test_outputs, test_output_sizes,
+         puzzle_id) = puzzle_data
+        
+        # Move to device
+        train_inputs = [inp.to(device) for inp in train_inputs]
+        train_outputs = [out.to(device) for out in train_outputs]
+        test_inputs = [inp.to(device) for inp in test_inputs]
+        test_outputs = [out.to(device) for out in test_outputs]
+        
+        optimizer.zero_grad()
+        
+        # Process each test example
+        batch_loss = 0
+        for test_idx, (test_inp, test_inp_size, test_out, test_out_size) in enumerate(
+            zip(test_inputs, test_input_sizes, test_outputs, test_output_sizes)):
+            
+            # Forward pass
+            logits, message, soft_message, message_lengths, rule = model(
+                train_inputs, train_input_sizes,
+                train_outputs, train_output_sizes,
+                test_inp, test_inp_size, test_out_size,
+                temperature=temperature
+            )
+            
+            # Compute loss
+            H, W = logits.shape[2], logits.shape[3]
+            target_grid = test_out.unsqueeze(0)[:, :H, :W]
+            
+            logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+            targets_flat = target_grid.reshape(-1)
+            
+            loss = criterion(logits_flat, targets_flat)
+            batch_loss += loss
+            
+            # Calculate accuracy on actual (non-padded) pixels
+            out_h, out_w = test_out_size
+            pred = logits.argmax(dim=1).squeeze(0)
+            target = test_out
+            correct_pixels += (pred[:out_h, :out_w] == target[:out_h, :out_w]).sum().item()
+            total_pixels += out_h * out_w
+        
+        # Average loss over test examples
+        loss = batch_loss / len(test_inputs)
+        loss.backward()
+        optimizer.step()
+        
+        total_loss += loss.item()
+        
+        # Calculate metrics
+        avg_loss = total_loss / (batch_idx + 1)
+        accuracy = 100. * correct_pixels / total_pixels if total_pixels > 0 else 0.0
+        
+        # Update live plot
+        if plotter is not None:
+            plotter.update(avg_loss, accuracy)
+        
+        # Update progress bar
+        if (batch_idx + 1) % config.LOG_INTERVAL == 0:
+            pbar.set_postfix({
+                'loss': f'{avg_loss:.4f}',
+                'acc': f'{accuracy:.2f}%',
+                'puzzle': puzzle_id
+            })
+    
+    return total_loss / len(dataloader), 100. * correct_pixels / total_pixels if total_pixels > 0 else 0.0
+
+
+def validate_puzzle_solving(model, dataloader, criterion, device):
+    """Validation for puzzle solving task."""
+    model.eval()
+    total_loss = 0
+    correct_pixels = 0
+    total_pixels = 0
+    
+    with torch.no_grad():
+        for puzzle_data in tqdm(dataloader, desc='Validation'):
+            (train_inputs, train_input_sizes, train_outputs, train_output_sizes,
+             test_inputs, test_input_sizes, test_outputs, test_output_sizes,
+             puzzle_id) = puzzle_data
+            
+            # Move to device
+            train_inputs = [inp.to(device) for inp in train_inputs]
+            train_outputs = [out.to(device) for out in train_outputs]
+            test_inputs = [inp.to(device) for inp in test_inputs]
+            test_outputs = [out.to(device) for out in test_outputs]
+            
+            # Process each test example
+            batch_loss = 0
+            for test_idx, (test_inp, test_inp_size, test_out, test_out_size) in enumerate(
+                zip(test_inputs, test_input_sizes, test_outputs, test_output_sizes)):
+                
+                logits, _, _, _, _ = model(
+                    train_inputs, train_input_sizes,
+                    train_outputs, train_output_sizes,
+                    test_inp, test_inp_size, test_out_size,
+                    temperature=1.0
+                )
+                
+                # Compute loss
+                H, W = logits.shape[2], logits.shape[3]
+                target_grid = test_out.unsqueeze(0)[:, :H, :W]
+                
+                logits_flat = logits.permute(0, 2, 3, 1).reshape(-1, logits.shape[1])
+                targets_flat = target_grid.reshape(-1)
+                
+                loss = criterion(logits_flat, targets_flat)
+                batch_loss += loss
+                
+                # Calculate accuracy
+                out_h, out_w = test_out_size
+                pred = logits.argmax(dim=1).squeeze(0)
+                target = test_out
+                correct_pixels += (pred[:out_h, :out_w] == target[:out_h, :out_w]).sum().item()
+                total_pixels += out_h * out_w
+            
+            total_loss += (batch_loss / len(test_inputs)).item()
+    
+    return total_loss / len(dataloader), 100. * correct_pixels / total_pixels if total_pixels > 0 else 0.0
+
 
 def main():
     # Set device
@@ -850,6 +980,12 @@ def main():
     
     # Determine task type and num distractors FIRST (before using them)
     task_type = getattr(config, 'TASK_TYPE', 'reconstruction')
+        # ADD THIS CHECK:
+    if task_type == 'puzzle_solving':
+        # Puzzle solving uses different dataset and training loop
+        train_puzzle_solving_mode(device)
+        return  # Exit early, puzzle solving handled separately
+
     num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
     track_puzzle_ids = task_type == 'puzzle_classification'
     use_input_output_pairs = getattr(config, 'USE_INPUT_OUTPUT_PAIRS', False)
@@ -1141,6 +1277,233 @@ def main():
             print(f'Autoencoder learned to compress grids to {config.LATENT_DIM}-dimensional latent space')
         print('The decoder/receiver was given target sizes directly!')
 
+def train_puzzle_solving_mode(device):
+    """Training mode for puzzle solving."""
+    print('='*80)
+    print('PUZZLE SOLVING MODE')
+    print('='*80)
+    
+    # Create save directory
+    os.makedirs(config.SAVE_DIR, exist_ok=True)
+    
+    # Get dataset configuration
+    dataset_version = getattr(config, 'DATASET_VERSION', 'V2')
+    dataset_split = getattr(config, 'DATASET_SPLIT', 'training')
+    
+    # Construct data path (same logic as app.py)
+    if dataset_version in ['V1', 'V2']:
+        data_path = os.path.join(dataset_version, 'data', dataset_split)
+    else:
+        data_path = config.DATA_PATH
+    
+    # Display configuration
+    print(f'\nBOTTLENECK TYPE: {config.BOTTLENECK_TYPE.upper()}')
+    if config.BOTTLENECK_TYPE == 'communication':
+        use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
+        print(f'  - Vocabulary size: {config.VOCAB_SIZE}')
+        if use_stop_token:
+            stop_token_id = getattr(config, 'STOP_TOKEN_ID', config.VOCAB_SIZE)
+            print(f'  - Stop token enabled: True (ID: {stop_token_id})')
+        else:
+            print(f'  - Stop token enabled: False')
+        print(f'  - Max message length: {config.MAX_MESSAGE_LENGTH}')
+    
+    rule_dim = getattr(config, 'RULE_DIM', 256)
+    pair_combination = getattr(config, 'PAIR_COMBINATION', 'concat')
+    max_puzzles = getattr(config, 'MAX_PUZZLES', None)
+    max_train_examples = getattr(config, 'MAX_TRAIN_EXAMPLES_PER_PUZZLE', None)
+    
+    print(f'\nPUZZLE SOLVING CONFIG:')
+    print(f'  - Dataset: {dataset_version}/{dataset_split}')
+    print(f'  - Data path: {data_path}')
+    print(f'  - Rule dimension: {rule_dim}')
+    print(f'  - Pair combination: {pair_combination}')
+    print(f'  - Max puzzles: {max_puzzles or "all"}')
+    print(f'  - Max train examples per puzzle: {max_train_examples or "all"}')
+    print('='*80 + '\n')
+    
+    # Load dataset
+    print('Loading puzzle dataset...')
+    dataset = ARCPuzzleTrainingDataset(
+        data_path,
+        max_puzzles=max_puzzles,
+        max_train_examples=max_train_examples,
+        max_test_examples=1
+    )
+    
+    # Split into train/val
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        dataset, [train_size, val_size]
+    )
+    
+    # Create dataloaders (batch_size MUST be 1 for puzzle training)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=1,
+        shuffle=True,
+        collate_fn=collate_fn_puzzle_training,
+        num_workers=0
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=collate_fn_puzzle_training,
+        num_workers=0
+    )
+    
+    # Create encoder
+    print('Creating model...')
+    encoder = ARCEncoder(
+        num_colors=config.NUM_COLORS,
+        embedding_dim=config.EMBEDDING_DIM,
+        hidden_dim=config.HIDDEN_DIM,
+        latent_dim=config.LATENT_DIM,
+        num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
+    )
+    
+    # Load pretrained encoder if available
+    if hasattr(config, 'USE_PRETRAINED') and config.USE_PRETRAINED:
+        pretrained_path = os.path.join(config.SAVE_DIR, 'pretrained_encoder.pth')
+        load_pretrained_encoder(encoder, pretrained_path)
+    
+    # Create puzzle solver
+    use_stop_token = getattr(config, 'USE_STOP_TOKEN', False)
+    stop_token_id = getattr(config, 'STOP_TOKEN_ID', None)
+    
+    model = ARCPuzzleSolver(
+        encoder=encoder,
+        vocab_size=config.VOCAB_SIZE if config.BOTTLENECK_TYPE == 'communication' else None,
+        max_length=config.MAX_MESSAGE_LENGTH if config.BOTTLENECK_TYPE == 'communication' else None,
+        num_colors=config.NUM_COLORS,
+        embedding_dim=config.EMBEDDING_DIM,
+        hidden_dim=config.HIDDEN_DIM,
+        max_grid_size=config.MAX_GRID_SIZE,
+        bottleneck_type=config.BOTTLENECK_TYPE,
+        rule_dim=rule_dim,
+        pair_combination=pair_combination,
+        num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 2),
+        use_stop_token=use_stop_token,
+        stop_token_id=stop_token_id,
+        lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
+    ).to(device)
+    
+    # Freeze encoder if configured
+    if hasattr(config, 'FREEZE_ENCODER') and config.FREEZE_ENCODER:
+        print('\n🔒 Freezing encoder weights')
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+        frozen_params = sum(p.numel() for p in model.encoder.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f'  - Frozen parameters: {frozen_params:,}')
+        print(f'  - Trainable parameters: {trainable_params:,}')
+    
+    print(f'Total model parameters: {sum(p.numel() for p in model.parameters()):,}')
+    
+    # Loss and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=config.LEARNING_RATE)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+    )
+    
+    # Create live plotter
+    print('Initializing live plotter...')
+    plotter = LivePlotter(
+        update_interval=1,
+        max_points=getattr(config, 'MAX_PLOT_POINTS', 10000),
+        max_epoch_markers=getattr(config, 'MAX_EPOCH_MARKERS', 50)
+    )
+    
+    # Training loop
+    best_val_loss = float('inf')
+    temperature = config.TEMPERATURE if config.BOTTLENECK_TYPE == 'communication' else 1.0
+    
+    print('Starting training...')
+    
+    try:
+        for epoch in range(config.NUM_EPOCHS):
+            print(f'\nEpoch {epoch+1}/{config.NUM_EPOCHS}')
+            
+            # Train
+            train_loss, train_acc = train_epoch_puzzle_solving(
+                model, train_loader, optimizer, criterion, device, temperature,
+                plotter=plotter
+            )
+            
+            # Mark epoch boundary
+            plotter.add_epoch_marker(epoch + 1)
+            
+            # Validate
+            val_loss, val_acc = validate_puzzle_solving(
+                model, val_loader, criterion, device
+            )
+            
+            # Update learning rate
+            scheduler.step(val_loss)
+            
+            # Print statistics
+            print(f'Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
+            print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+            
+            # Save best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'encoder_state_dict': encoder.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_loss,
+                    'val_acc': val_acc,
+                    'bottleneck_type': config.BOTTLENECK_TYPE,
+                    'task_type': 'puzzle_solving',
+                    'rule_dim': rule_dim,
+                    'pair_combination': pair_combination,
+                }, os.path.join(config.SAVE_DIR, 'best_model_puzzle_solving.pth'))
+                print('✓ Saved best model')
+            
+            # Save checkpoint every 10 epochs
+            if (epoch + 1) % 10 == 0:
+                checkpoint_path = os.path.join(config.SAVE_DIR, f'checkpoint_puzzle_epoch_{epoch+1}.pth')
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'encoder_state_dict': encoder.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'bottleneck_type': config.BOTTLENECK_TYPE,
+                    'task_type': 'puzzle_solving',
+                }, checkpoint_path)
+                
+                # Clean up old checkpoints
+                keep_last = getattr(config, 'KEEP_LAST_CHECKPOINTS', 3)
+                cleanup_old_checkpoints(config.SAVE_DIR, keep_last=keep_last)
+        
+        # Save final plot
+        plotter.save(os.path.join(config.SAVE_DIR, 'training_progress_puzzle.png'))
+        print(f'Training plot saved to {config.SAVE_DIR}/training_progress_puzzle.png')
+        
+    except KeyboardInterrupt:
+        print('\n\nTraining interrupted by user!')
+        print('Saving progress...')
+        plotter.save(os.path.join(config.SAVE_DIR, 'training_progress_puzzle_interrupted.png'))
+        
+    except Exception as e:
+        print(f'\n\nError during training: {e}')
+        import traceback
+        traceback.print_exc()
+        plotter.save(os.path.join(config.SAVE_DIR, 'training_progress_puzzle_error.png'))
+        
+    finally:
+        plotter.close()
+    
+    print('\nPuzzle solving training complete!')
 
 if __name__ == '__main__':
     main()
+
+

@@ -20,9 +20,14 @@ NUM_CONV_LAYERS = 3  # Number of convolutional layers in encoder (1-3 recommende
 BOTTLENECK_TYPE = 'communication'  # 'communication' or 'autoencoder'
 
 # Task Type
-TASK_TYPE = 'selection'  # 'reconstruction', 'selection', or 'puzzle_classification'
+TASK_TYPE = 'reconstruction'  # 'reconstruction', 'selection', 'puzzle_classification', 'puzzle_solving'
 NUM_DISTRACTORS = 1  # Number of distractor grids for selection task (actual number will be min(NUM_DISTRACTORS, total_grids-1))
 USE_INPUT_OUTPUT_PAIRS = False  # If True, train on input→output transformations (requires reconstruction or selection task)
+
+RULE_DIM = 256  # Dimension of rule representation
+PAIR_COMBINATION = 'concat'  # How to combine input/output: 'concat' or 'delta'
+MAX_PUZZLES = None  # Limit number of puzzles (None = all)
+MAX_TRAIN_EXAMPLES_PER_PUZZLE = None  # Limit training examples per puzzle (None = all)
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
 VOCAB_SIZE = 25  # Size of discrete symbol vocabulary (actual vocab, stop token is separate)

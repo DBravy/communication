@@ -111,6 +111,11 @@ training_state = {
     'dataset_split': getattr(config, 'DATASET_SPLIT', 'training'),  # 'training' or 'evaluation'
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
+    # Puzzle solving configuration
+    'rule_dim': getattr(config, 'RULE_DIM', 256),
+    'pair_combination': getattr(config, 'PAIR_COMBINATION', 'concat'),
+    'max_puzzles': getattr(config, 'MAX_PUZZLES', None),
+    'max_train_examples_per_puzzle': getattr(config, 'MAX_TRAIN_EXAMPLES_PER_PUZZLE', None),
     # Model architecture
     'hidden_dim': getattr(config, 'HIDDEN_DIM', 128),
     'latent_dim': getattr(config, 'LATENT_DIM', 128),
@@ -1028,6 +1033,37 @@ def train_worker():
         
         # Get task settings from training_state
         task_type = training_state['task_type']
+        
+        # Handle puzzle_solving task type separately
+        if task_type == 'puzzle_solving':
+            # Apply puzzle solving config from training_state
+            config.TASK_TYPE = 'puzzle_solving'
+            config.DATASET_VERSION = training_state['dataset_version']
+            config.DATASET_SPLIT = training_state['dataset_split']
+            config.RULE_DIM = training_state['rule_dim']
+            config.PAIR_COMBINATION = training_state['pair_combination']
+            config.MAX_PUZZLES = training_state['max_puzzles']
+            config.MAX_TRAIN_EXAMPLES_PER_PUZZLE = training_state['max_train_examples_per_puzzle']
+            config.HIDDEN_DIM = training_state['hidden_dim']
+            config.LATENT_DIM = training_state['latent_dim']
+            config.VOCAB_SIZE = training_state['vocab_size']
+            config.MAX_MESSAGE_LENGTH = training_state['max_message_length']
+            config.TEMPERATURE = training_state['temperature']
+            config.USE_STOP_TOKEN = training_state['use_stop_token']
+            config.BATCH_SIZE = training_state['batch_size']
+            config.LEARNING_RATE = training_state['learning_rate']
+            config.NUM_EPOCHS = training_state['num_epochs']
+            config.BOTTLENECK_TYPE = training_state.get('bottleneck_type', 'communication')
+            
+            # Call the puzzle solving training function from train.py
+            from train import train_puzzle_solving_mode
+            train_puzzle_solving_mode(device)
+            
+            # Training completed successfully
+            status_queue.put({'status': 'completed'})
+            training_state['running'] = False
+            return
+        
         num_distractors = training_state['num_distractors'] if task_type == 'selection' else 0
         track_puzzle_ids = task_type == 'puzzle_classification'
         use_input_output_pairs = training_state.get('use_input_output_pairs', False)
@@ -2099,6 +2135,11 @@ def puzzle_solver():
     return render_template('puzzle_solver.html')
 
 
+@app.route('/puzzle_training')
+def puzzle_training():
+    return render_template('puzzle_training.html')
+
+
 @app.route('/list_puzzles', methods=['GET'])
 def list_puzzles():
     """List all available puzzle IDs from the dataset."""
@@ -2256,6 +2297,11 @@ def get_task_config():
         'dataset_split': training_state['dataset_split'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
+        # Puzzle solving configuration
+        'rule_dim': training_state['rule_dim'],
+        'pair_combination': training_state['pair_combination'],
+        'max_puzzles': training_state['max_puzzles'],
+        'max_train_examples_per_puzzle': training_state['max_train_examples_per_puzzle'],
         # Model architecture
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
@@ -2310,6 +2356,16 @@ def set_task_config():
         training_state['max_grids'] = int(data['max_grids']) if data['max_grids'] else None
     if 'filter_grid_size' in data:
         training_state['filter_grid_size'] = data['filter_grid_size']  # Can be None or [height, width]
+    
+    # Puzzle solving configuration
+    if 'rule_dim' in data:
+        training_state['rule_dim'] = int(data['rule_dim'])
+    if 'pair_combination' in data:
+        training_state['pair_combination'] = data['pair_combination']
+    if 'max_puzzles' in data:
+        training_state['max_puzzles'] = int(data['max_puzzles']) if data['max_puzzles'] else None
+    if 'max_train_examples_per_puzzle' in data:
+        training_state['max_train_examples_per_puzzle'] = int(data['max_train_examples_per_puzzle']) if data['max_train_examples_per_puzzle'] else None
     
     # Model architecture
     if 'hidden_dim' in data:
@@ -2374,6 +2430,10 @@ def set_task_config():
         'dataset_split': training_state['dataset_split'],
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
+        'rule_dim': training_state['rule_dim'],
+        'pair_combination': training_state['pair_combination'],
+        'max_puzzles': training_state['max_puzzles'],
+        'max_train_examples_per_puzzle': training_state['max_train_examples_per_puzzle'],
         'hidden_dim': training_state['hidden_dim'],
         'latent_dim': training_state['latent_dim'],
         'num_conv_layers': training_state['num_conv_layers'],

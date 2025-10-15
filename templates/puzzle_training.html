@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARC Puzzle Training</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .nav-link {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-50%) scale(1.05);
+        }
+        
+        .info-box {
+            background: #fff5f7;
+            border-left: 4px solid #f5576c;
+            padding: 20px 30px;
+            margin: 20px 30px;
+            border-radius: 4px;
+        }
+        
+        .info-box h3 {
+            color: #c41e3a;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+        
+        .info-box p {
+            color: #c41e3a;
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .info-box ul {
+            margin-left: 30px;
+            color: #c41e3a;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .task-config {
+            padding: 20px 30px;
+            background: #fff0f5;
+            border-bottom: 2px solid #ffc0cb;
+        }
+        
+        .task-config h3 {
+            margin-bottom: 20px;
+            color: #c41e3a;
+            font-size: 20px;
+        }
+        
+        .config-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #f093fb;
+        }
+        
+        .config-section-title {
+            margin-bottom: 12px;
+            color: #c41e3a;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .config-row {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .config-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .config-group label {
+            font-weight: 600;
+            color: #4a5568;
+            white-space: nowrap;
+        }
+        
+        select, input[type="number"], input[type="text"] {
+            padding: 8px 12px;
+            border: 2px solid #cbd5e0;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+        
+        select:focus, input[type="number"]:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #f093fb;
+        }
+        
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .btn-train {
+            background: #f5576c;
+            color: white;
+        }
+        
+        .btn-train:hover:not(:disabled) {
+            background: #e0445a;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.3);
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+        }
+        
+        .btn-stop:hover:not(:disabled) {
+            background: #dc2626;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);
+        }
+        
+        .btn-save-checkpoint {
+            background: #f093fb;
+            color: white;
+        }
+        
+        .btn-save-checkpoint:hover:not(:disabled) {
+            background: #d970e6;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(240, 147, 251, 0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-weight: 600;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .notification-error {
+            background: #ef4444;
+            color: white;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .status-display {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+        
+        .status-item {
+            text-align: center;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #6b7280;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #1f2937;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-running {
+            background: #f5576c;
+        }
+        
+        .status-stopped {
+            background: #6b7280;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .mode-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 8px;
+            background: #fff5f7;
+            color: #c41e3a;
+        }
+        
+        .metrics-summary {
+            padding: 30px;
+            background: #f8f9fa;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .metric-label {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 10px;
+        }
+        
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #f5576c;
+        }
+        
+        .charts {
+            padding: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 30px;
+            background: white;
+            border-bottom: 2px solid #e9ecef;
+        }
+        
+        .chart-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .chart-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        canvas {
+            max-height: 300px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .results-section {
+            padding: 30px;
+            background: white;
+            border-top: 2px solid #e9ecef;
+        }
+        
+        .section-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 30px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .section-title:after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 3px;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 2px;
+        }
+        
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .result-container {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .pair-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .pair-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+        }
+        
+        .accuracy-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+        
+        .grids-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .grid-wrapper {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        
+        .grid-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #f5576c;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .arc-grid {
+            display: inline-grid;
+            gap: 2px;
+            padding: 10px;
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        
+        .grid-cell {
+            width: 20px;
+            height: 20px;
+            border: 1px solid rgba(0,0,0,0.1);
+        }
+        
+        .message-display {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff7ed;
+            border-radius: 6px;
+            font-size: 11px;
+            font-family: 'Courier New', monospace;
+            color: #9a3412;
+            word-break: break-all;
+            max-height: 60px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/" class="nav-link">← Back to Main</a>
+            <h1>🧩 ARC Puzzle Training</h1>
+            <p>Train Communication System on Puzzle Solving from Scratch</p>
+        </div>
+        
+        <div class="info-box">
+            <h3>About Puzzle Solving Training</h3>
+            <p>This mode trains the communication system specifically for puzzle solving - learning to transform input grids to output grids by understanding ARC puzzle rules.</p>
+            <ul>
+                <li><strong>Training Setup:</strong> Multiple puzzles with training and test examples</li>
+                <li><strong>Goal:</strong> Learn general transformation patterns from demonstrations</li>
+                <li><strong>Architecture:</strong> Encoder extracts rules from training examples, applies them to test inputs</li>
+                <li><strong>Communication:</strong> Agents communicate about puzzle rules and transformations</li>
+            </ul>
+            <p style="margin-top: 10px;"><strong>Note:</strong> This is different from the main training page - here we train on puzzle solving as the primary task (TASK_TYPE = puzzle_solving).</p>
+        </div>
+        
+        <div class="task-config">
+            <h3>⚙️ Configuration Settings</h3>
+            
+            <!-- Data Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">📁 Data Configuration</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="datasetVersion">Dataset Version:</label>
+                        <select id="datasetVersion" onchange="markConfigDirty()">
+                            <option value="V1">V1 (400 training / 400 eval)</option>
+                            <option value="V2" selected>V2 (1000 training / 120 eval)</option>
+                        </select>
+                    </div>
+                    <div class="config-group">
+                        <label for="datasetSplit">Dataset Split:</label>
+                        <select id="datasetSplit" onchange="markConfigDirty()">
+                            <option value="training" selected>Training</option>
+                            <option value="evaluation">Evaluation</option>
+                        </select>
+                    </div>
+                    <div class="config-group">
+                        <label for="maxPuzzles">Max Puzzles:</label>
+                        <input type="number" id="maxPuzzles" min="0" max="1000" placeholder="None (all)" onchange="markConfigDirty()">
+                        <span style="font-size: 12px; color: #6b7280;">(0 = all)</span>
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="maxTrainExamples">Max Train Examples/Puzzle:</label>
+                        <input type="number" id="maxTrainExamples" min="0" max="20" placeholder="None (all)" onchange="markConfigDirty()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Model Architecture -->
+            <div class="config-section">
+                <h4 class="config-section-title">🏗️ Model Architecture</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="hiddenDim">Hidden Dim:</label>
+                        <input type="number" id="hiddenDim" min="32" max="1024" step="32" value="128" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="latentDim">Latent Dim:</label>
+                        <input type="number" id="latentDim" min="32" max="1024" step="32" value="128" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="ruleDim">Rule Dim:</label>
+                        <input type="number" id="ruleDim" min="64" max="1024" step="32" value="256" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="pairCombination">Pair Combination:</label>
+                        <select id="pairCombination" onchange="markConfigDirty()">
+                            <option value="concat" selected>Concatenate</option>
+                            <option value="delta">Delta</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Communication Protocol -->
+            <div class="config-section">
+                <h4 class="config-section-title">💬 Communication Protocol</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="vocabSize">Vocabulary Size:</label>
+                        <input type="number" id="vocabSize" min="2" max="1000" value="25" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="maxMessageLength">Max Message Length:</label>
+                        <input type="number" id="maxMessageLength" min="1" max="10" value="5" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="temperature">Temperature:</label>
+                        <input type="number" id="temperature" min="0.1" max="5" step="0.1" value="1.0" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="useStopToken" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="useStopToken" onchange="markConfigDirty()" checked>
+                            <span>Use Stop Token</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Training Hyperparameters -->
+            <div class="config-section">
+                <h4 class="config-section-title">📊 Training Hyperparameters</h4>
+                <div class="config-row">
+                    <div class="config-group">
+                        <label for="batchSize">Batch Size:</label>
+                        <input type="number" id="batchSize" min="1" max="256" value="1" onchange="markConfigDirty()">
+                        <span style="font-size: 12px; color: #6b7280;">(typically 1 for puzzle training)</span>
+                    </div>
+                    <div class="config-group">
+                        <label for="learningRate">Learning Rate:</label>
+                        <input type="number" id="learningRate" min="0.000001" max="0.1" step="0.000001" value="0.0001" onchange="markConfigDirty()">
+                    </div>
+                    <div class="config-group">
+                        <label for="numEpochs">Epochs:</label>
+                        <input type="number" id="numEpochs" min="1" max="1000000" value="100000" onchange="markConfigDirty()">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #ffc0cb; text-align: center;">
+                <button id="saveConfigBtn" onclick="saveTaskConfig()" style="padding: 12px 40px; background: #f093fb; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px;">
+                    💾 Save Configuration
+                </button>
+                <span id="configStatus" style="font-size: 14px; color: #6b7280; margin-left: 15px;"></span>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="button-group">
+                <button class="btn-train" id="trainBtn" onclick="startTrain()">
+                    Start Puzzle Training
+                </button>
+                <button class="btn-stop" id="stopBtn" onclick="stopTraining()" disabled>
+                    Stop Training
+                </button>
+                <button class="btn-save-checkpoint" id="saveCheckpointBtn" onclick="saveCheckpoint()" disabled>
+                    💾 Save Checkpoint
+                </button>
+            </div>
+            
+            <div class="status-display">
+                <div class="status-item">
+                    <div class="status-label">Status</div>
+                    <div class="status-value">
+                        <span class="status-indicator status-stopped" id="statusIndicator"></span>
+                        <span id="statusText">Stopped</span>
+                        <span class="mode-badge hidden" id="modeBadge"></span>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Epoch</div>
+                    <div class="status-value" id="epochDisplay">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Batch</div>
+                    <div class="status-value" id="batchDisplay">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="metrics-summary">
+            <div class="metric-card">
+                <div class="metric-label">Loss (Moving Avg)</div>
+                <div class="metric-value" id="lossValue">0.000</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Pixel Accuracy (Moving Avg)</div>
+                <div class="metric-value" id="accValue">0.00%</div>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="chart-container">
+                <div class="chart-title">Loss Over Time (20-batch Moving Average)</div>
+                <canvas id="lossChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Accuracy Over Time (20-batch Moving Average)</div>
+                <canvas id="accuracyChart"></canvas>
+            </div>
+        </div>
+
+        <div class="results-section" id="resultsSection">
+            <h2 class="section-title">Live Puzzle Solutions</h2>
+            <div class="results-grid" id="resultsContainer">
+                <div style="text-align: center; color: #6b7280; grid-column: 1 / -1;">
+                    Start training to see puzzle solutions...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const ARC_COLORS = [
+            '#000000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+            '#AAAAAA', '#F012BE', '#7FDBFF', '#870C25', '#FF851B'
+        ];
+        
+        let configDirty = false;
+        const MAX_POINTS = 10000;
+        const CHART_UPDATE_MS = 200;
+        
+        // Load config on page load
+        fetch('/task_config')
+            .then(response => response.json())
+            .then(data => {
+                // Data configuration
+                document.getElementById('datasetVersion').value = data.dataset_version || 'V2';
+                document.getElementById('datasetSplit').value = data.dataset_split || 'training';
+                document.getElementById('maxPuzzles').value = data.max_puzzles || '';
+                document.getElementById('maxTrainExamples').value = data.max_train_examples_per_puzzle || '';
+                
+                // Model architecture
+                document.getElementById('hiddenDim').value = data.hidden_dim || 128;
+                document.getElementById('latentDim').value = data.latent_dim || 128;
+                document.getElementById('ruleDim').value = data.rule_dim || 256;
+                document.getElementById('pairCombination').value = data.pair_combination || 'concat';
+                
+                // Communication protocol
+                document.getElementById('vocabSize').value = data.vocab_size || 25;
+                document.getElementById('maxMessageLength').value = data.max_message_length || 5;
+                document.getElementById('temperature').value = data.temperature || 1.0;
+                document.getElementById('useStopToken').checked = data.use_stop_token !== false;
+                
+                // Training hyperparameters
+                document.getElementById('batchSize').value = data.batch_size || 1;
+                document.getElementById('learningRate').value = data.learning_rate || 0.0001;
+                document.getElementById('numEpochs').value = data.num_epochs || 100000;
+                
+                configDirty = false;
+                updateConfigStatus();
+            })
+            .then(() => {
+                loadMetricsHistory();
+            });
+        
+        function markConfigDirty() {
+            configDirty = true;
+            updateConfigStatus();
+        }
+        
+        function updateConfigStatus() {
+            const statusEl = document.getElementById('configStatus');
+            const saveBtn = document.getElementById('saveConfigBtn');
+            
+            if (configDirty) {
+                statusEl.textContent = '⚠️ Unsaved changes';
+                statusEl.style.color = '#f59e0b';
+                saveBtn.style.background = '#f59e0b';
+                saveBtn.style.animation = 'pulse 2s infinite';
+            } else {
+                statusEl.textContent = '✓ Saved';
+                statusEl.style.color = '#10b981';
+                saveBtn.style.background = '#f093fb';
+                saveBtn.style.animation = 'none';
+            }
+        }
+        
+        function saveTaskConfig() {
+            // Get all configuration values
+            const config = {
+                task_type: 'puzzle_solving',  // Fixed for this page
+                dataset_version: document.getElementById('datasetVersion').value,
+                dataset_split: document.getElementById('datasetSplit').value,
+                max_puzzles: document.getElementById('maxPuzzles').value ? parseInt(document.getElementById('maxPuzzles').value) : null,
+                max_train_examples_per_puzzle: document.getElementById('maxTrainExamples').value ? parseInt(document.getElementById('maxTrainExamples').value) : null,
+                hidden_dim: parseInt(document.getElementById('hiddenDim').value),
+                latent_dim: parseInt(document.getElementById('latentDim').value),
+                rule_dim: parseInt(document.getElementById('ruleDim').value),
+                pair_combination: document.getElementById('pairCombination').value,
+                vocab_size: parseInt(document.getElementById('vocabSize').value),
+                max_message_length: parseInt(document.getElementById('maxMessageLength').value),
+                temperature: parseFloat(document.getElementById('temperature').value),
+                use_stop_token: document.getElementById('useStopToken').checked,
+                batch_size: parseInt(document.getElementById('batchSize').value),
+                learning_rate: parseFloat(document.getElementById('learningRate').value),
+                num_epochs: parseInt(document.getElementById('numEpochs').value)
+            };
+            
+            fetch('/task_config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    configDirty = false;
+                    updateConfigStatus();
+                    const statusEl = document.getElementById('configStatus');
+                    statusEl.textContent = '✓ Configuration saved!';
+                    statusEl.style.color = '#10b981';
+                } else {
+                    alert(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving config:', error);
+                alert('Error saving configuration');
+            });
+        }
+        
+        function renderGrid(gridData, containerId) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const rows = gridData.length;
+            const cols = gridData[0].length;
+            
+            const gridElement = document.createElement('div');
+            gridElement.className = 'arc-grid';
+            gridElement.style.gridTemplateColumns = `repeat(${cols}, 20px)`;
+            
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'grid-cell';
+                    const colorValue = gridData[r][c];
+                    cell.style.backgroundColor = ARC_COLORS[colorValue] || '#ffffff';
+                    gridElement.appendChild(cell);
+                }
+            }
+            
+            container.appendChild(gridElement);
+        }
+        
+        function displayReconstructions(reconstructions, epoch, batch) {
+            const container = document.getElementById('resultsContainer');
+            container.innerHTML = '';
+            
+            reconstructions.forEach((recon, idx) => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-container';
+                
+                const accuracyColor = recon.accuracy > 80 ? '#10b981' : 
+                                      recon.accuracy > 50 ? '#f59e0b' : '#ef4444';
+                
+                const messageHTML = recon.message ? `
+                    <div class="message-display" style="margin: 0; padding: 8px 12px; flex-shrink: 0;">
+                        Symbol Sequence: [${recon.message.join(', ')}]
+                    </div>
+                ` : '';
+                
+                const epochBatchHTML = (epoch !== undefined && batch !== undefined) ? `
+                    <span style="font-size: 10px; color: #9ca3af; margin-left: auto; padding: 2px 8px;">
+                        Epoch ${epoch} / Batch ${batch}
+                    </span>
+                ` : '';
+                
+                resultDiv.innerHTML = `
+                    <div class="pair-header" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                        <span class="pair-title">Sample ${idx + 1}</span>
+                        <span class="accuracy-badge" style="background: ${accuracyColor}">
+                            ${recon.accuracy.toFixed(1)}% Accurate
+                        </span>
+                        ${messageHTML}
+                        ${epochBatchHTML}
+                    </div>
+                    <div class="grids-container">
+                        <div class="grid-wrapper">
+                            <div class="grid-label">INPUT (${recon.actual_size[0]}×${recon.actual_size[1]})</div>
+                            <div id="input-${idx}" style="text-align: center;"></div>
+                        </div>
+                        <div class="grid-wrapper">
+                            <div class="grid-label">OUTPUT (${recon.output.length}×${recon.output[0].length})</div>
+                            <div id="output-${idx}" style="text-align: center;"></div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(resultDiv);
+                
+                setTimeout(() => {
+                    renderGrid(recon.input, `input-${idx}`);
+                    renderGrid(recon.output, `output-${idx}`);
+                }, 0);
+            });
+        }
+        
+        const chartConfig = {
+            type: 'line',
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    decimation: {
+                        enabled: true,
+                        algorithm: 'lttb',
+                        samples: 1500,
+                        threshold: 2000
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Batch'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        beginAtZero: true
+                    }
+                }
+            }
+        };
+        
+        const lossChart = new Chart(document.getElementById('lossChart'), {
+            ...chartConfig,
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Loss (Moving Avg)',
+                    data: [],
+                    borderColor: '#f5576c',
+                    backgroundColor: 'rgba(245, 87, 108, 0.1)',
+                    tension: 0.4
+                }]
+            }
+        });
+        
+        const accuracyChart = new Chart(document.getElementById('accuracyChart'), {
+            ...chartConfig,
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Accuracy % (Moving Avg)',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.4
+                }]
+            },
+            options: {
+                ...chartConfig.options,
+                scales: {
+                    ...chartConfig.options.scales,
+                    y: {
+                        display: true,
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+        
+        let batchCounter = 0;
+        let rawLossData = [];
+        let rawAccuracyData = [];
+        const MOVING_AVG_WINDOW = 20;
+        let lastRenderTime = 0;
+        
+        function renderChartsThrottled(force = false) {
+            const now = performance.now();
+            if (!force && now - lastRenderTime < CHART_UPDATE_MS) return;
+            lossChart.update('none');
+            accuracyChart.update('none');
+            lastRenderTime = now;
+        }
+        
+        function loadMetricsHistory() {
+            fetch('/metrics_history')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.history && data.history.length > 0) {
+                        console.log(`Loading ${data.history.length} historical data points...`);
+                        
+                        data.history.forEach((point, idx) => {
+                            batchCounter++;
+                            const label = batchCounter.toString();
+                            
+                            rawLossData.push(point.loss);
+                            rawAccuracyData.push(point.accuracy);
+                            if (rawLossData.length > MOVING_AVG_WINDOW) rawLossData.shift();
+                            if (rawAccuracyData.length > MOVING_AVG_WINDOW) rawAccuracyData.shift();
+                            
+                            const lossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+                            const accuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+                            
+                            lossChart.data.labels.push(label);
+                            lossChart.data.datasets[0].data.push(lossMA);
+                            accuracyChart.data.labels.push(label);
+                            accuracyChart.data.datasets[0].data.push(accuracyMA);
+                        });
+                        
+                        downsampleChart(lossChart, MAX_POINTS);
+                        downsampleChart(accuracyChart, MAX_POINTS);
+                        
+                        lossChart.update('none');
+                        accuracyChart.update('none');
+                        
+                        if (rawLossData.length > 0) {
+                            const finalLossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+                            const finalAccuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+                            document.getElementById('lossValue').textContent = finalLossMA.toFixed(3);
+                            document.getElementById('accValue').textContent = finalAccuracyMA.toFixed(2) + '%';
+                        }
+                        
+                        console.log('Historical data loaded successfully');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading metrics history:', error);
+                });
+        }
+        
+        function downsampleChart(chart, maxPoints) {
+            const labels = chart.data.labels;
+            const data = chart.data.datasets[0].data;
+            if (!labels || labels.length <= maxPoints) return;
+
+            const keepRecent = Math.floor(maxPoints / 2);
+            const oldCount = labels.length - keepRecent;
+
+            const newLabels = [];
+            const newData = [];
+            for (let i = 0; i < oldCount; i += 2) {
+                newLabels.push(labels[i]);
+                newData.push(data[i]);
+            }
+            for (let i = labels.length - keepRecent; i < labels.length; i++) {
+                newLabels.push(labels[i]);
+                newData.push(data[i]);
+            }
+            chart.data.labels = newLabels;
+            chart.data.datasets[0].data = newData;
+        }
+        
+        function calculateMovingAverage(data, windowSize) {
+            if (data.length < windowSize) {
+                const sum = data.reduce((acc, val) => acc + val, 0);
+                return sum / data.length;
+            }
+            const recentData = data.slice(-windowSize);
+            const sum = recentData.reduce((acc, val) => acc + val, 0);
+            return sum / windowSize;
+        }
+        
+        function updateCharts(metrics) {
+            batchCounter++;
+            const label = batchCounter.toString();
+            
+            rawLossData.push(metrics.loss);
+            rawAccuracyData.push(metrics.accuracy);
+            if (rawLossData.length > MOVING_AVG_WINDOW) rawLossData.shift();
+            if (rawAccuracyData.length > MOVING_AVG_WINDOW) rawAccuracyData.shift();
+            
+            const lossMA = calculateMovingAverage(rawLossData, MOVING_AVG_WINDOW);
+            const accuracyMA = calculateMovingAverage(rawAccuracyData, MOVING_AVG_WINDOW);
+            
+            lossChart.data.labels.push(label);
+            lossChart.data.datasets[0].data.push(lossMA);
+            accuracyChart.data.labels.push(label);
+            accuracyChart.data.datasets[0].data.push(accuracyMA);
+
+            downsampleChart(lossChart, MAX_POINTS);
+            downsampleChart(accuracyChart, MAX_POINTS);
+
+            renderChartsThrottled();
+            
+            document.getElementById('lossValue').textContent = lossMA.toFixed(3);
+            document.getElementById('accValue').textContent = accuracyMA.toFixed(2) + '%';
+        }
+        
+        function resetCharts() {
+            batchCounter = 0;
+            rawLossData = [];
+            rawAccuracyData = [];
+            lossChart.data.labels = [];
+            lossChart.data.datasets[0].data = [];
+            lossChart.update('none');
+            
+            accuracyChart.data.labels = [];
+            accuracyChart.data.datasets[0].data = [];
+            accuracyChart.update('none');
+            lastRenderTime = 0;
+        }
+        
+        function startTrain() {
+            if (configDirty) {
+                if (!confirm('You have unsaved configuration changes. Do you want to save them before starting training?')) {
+                    return;
+                }
+                saveTaskConfig();
+                setTimeout(() => startTrainInternal(), 500);
+            } else {
+                startTrainInternal();
+            }
+        }
+        
+        function startTrainInternal() {
+            fetch('/start_train', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        document.getElementById('trainBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('saveCheckpointBtn').disabled = false;
+                        document.getElementById('statusText').textContent = 'Running';
+                        document.getElementById('statusIndicator').className = 'status-indicator status-running';
+                        document.getElementById('modeBadge').className = 'mode-badge';
+                        document.getElementById('modeBadge').textContent = 'PUZZLE TRAINING';
+                        resetCharts();
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+        
+        function stopTraining() {
+            fetch('/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'stopped') {
+                        document.getElementById('trainBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('saveCheckpointBtn').disabled = true;
+                        document.getElementById('statusText').textContent = 'Stopped';
+                        document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                        document.getElementById('modeBadge').className = 'mode-badge hidden';
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }
+        
+        function showNotification(message, type = 'success') {
+            const existingNotifications = document.querySelectorAll('.notification');
+            existingNotifications.forEach(n => n.remove());
+            
+            const notification = document.createElement('div');
+            notification.className = `notification notification-${type}`;
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+        
+        function saveCheckpoint() {
+            const checkpointName = prompt('Enter checkpoint name:', `checkpoint_puzzle_epoch_${document.getElementById('epochDisplay').textContent}`);
+            
+            if (checkpointName === null) {
+                return;
+            }
+            
+            if (!checkpointName.trim()) {
+                showNotification('Please enter a valid checkpoint name', 'error');
+                return;
+            }
+            
+            fetch('/save_checkpoint', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ name: checkpointName.trim() })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showNotification('Error: ' + data.error, 'error');
+                } else {
+                    showNotification(`✓ Checkpoint save requested: ${data.checkpoint_name}`, 'success');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving checkpoint:', error);
+                showNotification('Failed to save checkpoint', 'error');
+            });
+        }
+        
+        const eventSource = new EventSource('/stream');
+        
+        eventSource.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            
+            if (message.type === 'heartbeat') {
+                return;
+            }
+            
+            if (message.type === 'status') {
+                const data = message.data;
+                
+                if (data.status === 'checkpoint_saved') {
+                    showNotification(`✓ Checkpoint saved: ${data.checkpoint_name} (Epoch ${data.epoch}, Batch ${data.batch})`, 'success');
+                    return;
+                }
+                
+                if (data.status === 'checkpoint_error') {
+                    showNotification(`✗ Failed to save checkpoint: ${data.message}`, 'error');
+                    return;
+                }
+            }
+            
+            if (message.type === 'metrics') {
+                const data = message.data;
+                
+                if (data.status === 'completed') {
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('saveCheckpointBtn').disabled = true;
+                    document.getElementById('statusText').textContent = 'Completed';
+                    document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                    document.getElementById('modeBadge').className = 'mode-badge hidden';
+                    return;
+                }
+                
+                if (data.status === 'error') {
+                    alert('Training error: ' + data.message);
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('stopBtn').disabled = true;
+                    document.getElementById('saveCheckpointBtn').disabled = true;
+                    document.getElementById('statusText').textContent = 'Error';
+                    document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
+                    document.getElementById('modeBadge').className = 'mode-badge hidden';
+                    return;
+                }
+                
+                if (data.epoch && data.batch && data.metrics) {
+                    document.getElementById('epochDisplay').textContent = data.epoch;
+                    document.getElementById('batchDisplay').textContent = data.batch;
+                    updateCharts(data.metrics);
+                }
+            }
+            
+            if (message.type === 'reconstructions') {
+                displayReconstructions(message.data, message.epoch, message.batch);
+            }
+        };
+        
+        eventSource.onerror = function(error) {
+            console.error('EventSource error:', error);
+        };
+        
+        setInterval(() => {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.running) {
+                        document.getElementById('trainBtn').disabled = true;
+                        document.getElementById('stopBtn').disabled = false;
+                        document.getElementById('saveCheckpointBtn').disabled = false;
+                    } else {
+                        document.getElementById('trainBtn').disabled = false;
+                        document.getElementById('stopBtn').disabled = true;
+                        document.getElementById('saveCheckpointBtn').disabled = true;
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        }, 2000);
+    </script>
+</body>
+</html>
+

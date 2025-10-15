@@ -884,3 +884,257 @@ class ARCAutoencoder(nn.Module):
             
             else:
                 raise NotImplementedError("Puzzle classification not yet supported in autoencoder mode")
+
+class ARCPuzzleSolver(nn.Module):
+    """
+    Puzzle solver that learns rules from input→output example pairs.
+    
+    Architecture:
+    1. Encode each (input, output) pair
+    2. Aggregate example encodings into a rule representation
+    3. Apply rule to test inputs to generate test outputs
+    """
+    def __init__(self, encoder, vocab_size=None, max_length=None, num_colors=10, 
+                 embedding_dim=10, hidden_dim=128, max_grid_size=30,
+                 bottleneck_type='communication', rule_dim=256, 
+                 pair_combination='concat', num_conv_layers=2,
+                 use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
+        super().__init__()
+        self.encoder = encoder
+        self.bottleneck_type = bottleneck_type
+        self.rule_dim = rule_dim
+        self.pair_combination = pair_combination
+        self.use_stop_token = use_stop_token
+        self.stop_token_id = stop_token_id
+        self.lstm_hidden_dim = lstm_hidden_dim or hidden_dim
+        
+        # Pair encoder: encodes (input, output) pairs
+        if pair_combination == 'concat':
+            # Concatenate input and output encodings
+            self.pair_encoder = nn.Sequential(
+                nn.Linear(encoder.latent_dim * 2, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(hidden_dim, rule_dim)
+            )
+        elif pair_combination == 'delta':
+            # Encode the transformation (delta between input and output)
+            self.pair_encoder = nn.Sequential(
+                nn.Linear(encoder.latent_dim * 2, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(hidden_dim, rule_dim)
+            )
+        else:
+            raise ValueError(f"Unknown pair_combination: {pair_combination}")
+        
+        # Rule aggregator: combines multiple examples into a single rule
+        self.rule_aggregator = nn.LSTM(rule_dim, rule_dim, batch_first=True)
+        
+        # Rule applier: applies rule to test input
+        if bottleneck_type == 'communication':
+            assert vocab_size is not None and max_length is not None
+            # Create sender that takes (rule + input) and outputs message
+            self.rule_sender = nn.Sequential(
+                nn.Linear(encoder.latent_dim + rule_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2)
+            )
+            
+            # Effective vocab size includes stop token if enabled
+            self.effective_vocab_size = vocab_size + 1 if use_stop_token else vocab_size
+            
+            # Message generator
+            self.message_lstm = nn.LSTM(self.effective_vocab_size, self.lstm_hidden_dim, batch_first=True)
+            self.vocab_proj = nn.Linear(self.lstm_hidden_dim, self.effective_vocab_size)
+            
+            # Project from rule_sender output to LSTM hidden size
+            self.sender_to_hidden = nn.Linear(hidden_dim, self.lstm_hidden_dim)
+            
+            # Receiver that takes message and reconstructs output
+            self.rule_receiver = ReceiverAgent(
+                vocab_size, num_colors, hidden_dim, max_grid_size,
+                receives_input_encoding=False,
+                use_stop_token=use_stop_token,
+                stop_token_id=stop_token_id,
+                lstm_hidden_dim=self.lstm_hidden_dim
+            )
+        else:  # autoencoder
+            # Direct decoder from (rule + input encoding)
+            self.rule_decoder = ARCDecoder(
+                encoder.latent_dim + rule_dim,
+                num_colors,
+                hidden_dim,
+                max_grid_size
+            )
+    
+    def encode_pair(self, input_grid, input_size, output_grid, output_size):
+        """Encode a single (input, output) pair."""
+        input_enc = self.encoder(input_grid.unsqueeze(0), sizes=[input_size])
+        output_enc = self.encoder(output_grid.unsqueeze(0), sizes=[output_size])
+        
+        if self.pair_combination == 'concat':
+            pair_enc = torch.cat([input_enc, output_enc], dim=1)
+        elif self.pair_combination == 'delta':
+            pair_enc = torch.cat([output_enc - input_enc, input_enc], dim=1)
+        
+        return self.pair_encoder(pair_enc)
+    
+    def aggregate_rule(self, example_encodings):
+        """
+        Aggregate multiple example encodings into a rule.
+        
+        Args:
+            example_encodings: [num_examples, rule_dim]
+        Returns:
+            rule: [1, rule_dim]
+        """
+        # Use LSTM to process sequence of examples
+        example_seq = example_encodings.unsqueeze(0)  # [1, num_examples, rule_dim]
+        _, (h, _) = self.rule_aggregator(example_seq)
+        rule = h.squeeze(0)  # [1, rule_dim]
+        return rule
+    
+    def apply_rule(self, rule, test_input, test_input_size, test_output_size, temperature=1.0):
+        """
+        Apply rule to test input to generate output.
+        
+        Args:
+            rule: [1, rule_dim]
+            test_input: [H, W] test input grid
+            test_input_size: (h, w) actual size
+            test_output_size: (h, w) target output size
+            temperature: Temperature for Gumbel-softmax
+            
+        Returns:
+            logits: Output logits
+            message: Discrete message (if communication mode)
+            soft_message: Soft message (if communication mode)
+            message_lengths: Actual message lengths (if using stop tokens)
+        """
+        # Encode test input
+        test_input_enc = self.encoder(test_input.unsqueeze(0), sizes=[test_input_size])
+        
+        if self.bottleneck_type == 'communication':
+            # Combine rule and input encoding
+            combined = torch.cat([rule, test_input_enc], dim=1)
+            sender_out = self.rule_sender(combined)
+            
+            # Generate message
+            h = self.sender_to_hidden(sender_out).unsqueeze(0)
+            c = torch.zeros_like(h)
+            
+            hard_messages = []
+            soft_messages = []
+            message_lengths = torch.full((1,), self.effective_vocab_size, 
+                                       dtype=torch.long, device=test_input.device)
+            stopped = False
+            
+            input_token = torch.zeros(1, self.effective_vocab_size, device=test_input.device)
+            
+            for t in range(self.effective_vocab_size):  # max_length
+                input_token_unsqueezed = input_token.unsqueeze(1)
+                lstm_out, (h, c) = self.message_lstm(input_token_unsqueezed, (h, c))
+                lstm_out = lstm_out.squeeze(1)
+                
+                logits = self.vocab_proj(lstm_out)
+                
+                # Prevent stop token at first position
+                if self.use_stop_token and t == 0:
+                    logits[:, self.stop_token_id] = -float('inf')
+                
+                if self.training:
+                    # Gumbel-softmax
+                    gumbel_noise = -torch.log(-torch.log(
+                        torch.rand_like(logits) + 1e-20) + 1e-20)
+                    gumbel_logits = (logits + gumbel_noise) / temperature
+                    soft_token = F.softmax(gumbel_logits, dim=-1)
+                    
+                    hard_token = F.one_hot(soft_token.argmax(dim=-1), 
+                                        num_classes=self.effective_vocab_size).float()
+                    
+                    token_for_next_input = hard_token.detach() - soft_token.detach() + soft_token
+                    
+                    soft_messages.append(soft_token)
+                    hard_symbol = soft_token.argmax(dim=-1)
+                    hard_messages.append(hard_symbol)
+                    
+                    # Check for stop token
+                    if self.use_stop_token and not stopped:
+                        is_stop = (hard_symbol == self.stop_token_id)
+                        if is_stop:
+                            message_lengths[0] = t + 1
+                            stopped = True
+                else:
+                    soft_token = F.softmax(logits, dim=-1)
+                    hard_symbol = logits.argmax(dim=-1)
+                    hard_token = F.one_hot(hard_symbol, num_classes=self.effective_vocab_size).float()
+                    token_for_next_input = hard_token
+                    
+                    soft_messages.append(soft_token)
+                    hard_messages.append(hard_symbol)
+                    
+                    # Check for stop token
+                    if self.use_stop_token and not stopped:
+                        is_stop = (hard_symbol == self.stop_token_id)
+                        if is_stop:
+                            message_lengths[0] = t + 1
+                            stopped = True
+                
+                input_token = token_for_next_input
+            
+            message = torch.stack(hard_messages, dim=1)
+            soft_message = torch.stack(soft_messages, dim=1)
+            
+            # Decode message to output
+            output_h, output_w = test_output_size
+            logits = self.rule_receiver(message, (output_h, output_w), 
+                                       soft_message=soft_message,
+                                       message_lengths=message_lengths)
+            
+            return logits, message, soft_message, message_lengths
+        else:
+            # Autoencoder mode
+            combined = torch.cat([rule, test_input_enc], dim=1)
+            output_h, output_w = test_output_size
+            logits = self.rule_decoder(combined, (output_h, output_w))
+            
+            return logits, None, None, None
+    
+    def forward(self, train_inputs, train_input_sizes, train_outputs, train_output_sizes,
+                test_input, test_input_size, test_output_size, temperature=1.0):
+        """
+        Full forward pass for a single puzzle.
+        
+        Args:
+            train_inputs: List of [H, W] training input grids
+            train_input_sizes: List of (h, w) actual sizes
+            train_outputs: List of [H, W] training output grids  
+            train_output_sizes: List of (h, w) actual sizes
+            test_input: [H, W] test input grid
+            test_input_size: (h, w) actual size
+            test_output_size: (h, w) target output size
+            
+        Returns:
+            logits: Output logits for test
+            message: Message (if communication mode)
+            soft_message: Soft message (if communication mode)
+            message_lengths: Message lengths (if using stop tokens)
+        """
+        # Encode all training pairs
+        example_encodings = []
+        for inp, inp_size, out, out_size in zip(train_inputs, train_input_sizes, 
+                                                 train_outputs, train_output_sizes):
+            pair_enc = self.encode_pair(inp, inp_size, out, out_size)
+            example_encodings.append(pair_enc)
+        
+        # Stack and aggregate
+        example_encodings = torch.cat(example_encodings, dim=0)  # [num_examples, rule_dim]
+        rule = self.aggregate_rule(example_encodings)
+        
+        # Apply rule to test input
+        logits, message, soft_message, message_lengths = self.apply_rule(
+            rule, test_input, test_input_size, test_output_size, temperature
+        )
+        
+        return logits, message, soft_message, message_lengths, rule
