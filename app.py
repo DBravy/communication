@@ -1390,31 +1390,31 @@ def train_worker():
                     })
                     
                     # Validation batch visualization
-                    for val_batch in val_loader:
-                        if task_type == 'selection':
-                            results = get_selections(model, val_batch, device, task_type)
-                        elif task_type == 'puzzle_classification':
-                            if use_input_output_pairs:
-                                val_grids = val_batch[0].to(device)
-                                val_sizes = val_batch[1]
-                            else:
-                                val_grids, val_sizes, val_labels = val_batch
-                                val_grids = val_grids.to(device)
-                            results = get_classification_preview(model, val_grids, val_sizes, device)
-                        else:
-                            if use_input_output_pairs:
-                                val_input_grids = val_batch[0].to(device)
-                                val_input_sizes = val_batch[1]
-                            else:
-                                val_input_grids, val_input_sizes = val_batch
-                                val_input_grids = val_input_grids.to(device)
-                            results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
-                        reconstructions_queue.put({
-                            'results': results,
-                            'epoch': epoch + 1,
-                            'batch': batch_idx + 1
-                        })
-                        break
+                    # for val_batch in val_loader:
+                    #     if task_type == 'selection':
+                    #         results = get_selections(model, val_batch, device, task_type)
+                    #     elif task_type == 'puzzle_classification':
+                    #         if use_input_output_pairs:
+                    #             val_grids = val_batch[0].to(device)
+                    #             val_sizes = val_batch[1]
+                    #         else:
+                    #             val_grids, val_sizes, val_labels = val_batch
+                    #             val_grids = val_grids.to(device)
+                    #         results = get_classification_preview(model, val_grids, val_sizes, device)
+                    #     else:
+                    #         if use_input_output_pairs:
+                    #             val_input_grids = val_batch[0].to(device)
+                    #             val_input_sizes = val_batch[1]
+                    #         else:
+                    #             val_input_grids, val_input_sizes = val_batch
+                    #             val_input_grids = val_input_grids.to(device)
+                    #         results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
+                    #     reconstructions_queue.put({
+                    #         'results': results,
+                    #         'epoch': epoch + 1,
+                    #         'batch': batch_idx + 1
+                    #     })
+                    #     break
                         
         training_state['running'] = False
         training_state['mode'] = None

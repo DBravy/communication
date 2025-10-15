@@ -22,13 +22,13 @@ BOTTLENECK_TYPE = 'communication'  # 'communication' or 'autoencoder'
 # Task Type
 TASK_TYPE = 'selection'  # 'reconstruction', 'selection', or 'puzzle_classification'
 NUM_DISTRACTORS = 1  # Number of distractor grids for selection task (actual number will be min(NUM_DISTRACTORS, total_grids-1))
-USE_INPUT_OUTPUT_PAIRS = True  # If True, train on input→output transformations (requires reconstruction or selection task)
+USE_INPUT_OUTPUT_PAIRS = False  # If True, train on input→output transformations (requires reconstruction or selection task)
 
 # Communication Protocol (only used if BOTTLENECK_TYPE == 'communication')
 VOCAB_SIZE = 25  # Size of discrete symbol vocabulary (actual vocab, stop token is separate)
 MAX_MESSAGE_LENGTH = 5  # Maximum length of message sequences
 TEMPERATURE = 1.0  # Gumbel-softmax temperature
-RECEIVER_GETS_INPUT_PUZZLE = True # If True, receiver also gets the encoder's latent (shared common ground)
+RECEIVER_GETS_INPUT_PUZZLE = False # If True, receiver also gets the encoder's latent (shared common ground)
 USE_STOP_TOKEN = True  # If True, agents can emit a stop token to terminate messages early (variable length)
 STOP_TOKEN_ID = VOCAB_SIZE  # ID for the stop token (should be VOCAB_SIZE, as it's appended to the vocabulary)
 
