@@ -2,10 +2,17 @@
 """Live plotting for training metrics with epoch markers."""
 
 import matplotlib
-try:
-    matplotlib.use("TkAgg")
-except Exception:
-    matplotlib.use("Agg")
+import os
+
+# Force non-interactive backend for headless environments (VMs, servers)
+# This prevents "Cannot load backend 'TkAgg'" errors
+if os.environ.get('DISPLAY') is None or os.environ.get('MPLBACKEND') == 'Agg':
+    matplotlib.use('Agg')
+else:
+    try:
+        matplotlib.use("TkAgg")
+    except Exception:
+        matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
@@ -34,7 +41,10 @@ class LivePlotter:
         self.epoch_marker_labels = []  # list[text objects]
 
         # Figure/axes
-        plt.ion()
+        # Only use interactive mode if we have a display
+        self.is_interactive = matplotlib.get_backend() != 'Agg'
+        if self.is_interactive:
+            plt.ion()
         self.fig, (self.ax_loss, self.ax_acc) = plt.subplots(1, 2, figsize=(10, 4))
         self.fig.suptitle("Training Progress", fontsize=12)
 
@@ -78,8 +88,8 @@ class LivePlotter:
         self.ax_loss.relim(); self.ax_loss.autoscale_view()
         self.ax_acc.relim();  self.ax_acc.autoscale_view()
 
-        # Redraw occasionally
-        if self.batch_counter % self.update_interval == 0:
+        # Redraw occasionally (only in interactive mode)
+        if self.is_interactive and self.batch_counter % self.update_interval == 0:
             self.fig.canvas.draw_idle()
             try:
                 self.fig.canvas.flush_events()
@@ -150,12 +160,13 @@ class LivePlotter:
                     except Exception:
                         pass
 
-        # Make sure new artists render
-        self.fig.canvas.draw_idle()
-        try:
-            self.fig.canvas.flush_events()
-        except Exception:
-            pass
+        # Make sure new artists render (only in interactive mode)
+        if self.is_interactive:
+            self.fig.canvas.draw_idle()
+            try:
+                self.fig.canvas.flush_events()
+            except Exception:
+                pass
 
     def clear_epoch_markers(self):
         """Optional helper to remove all existing epoch markers and labels."""
@@ -171,15 +182,17 @@ class LivePlotter:
                 pass
         self.epoch_marker_lines.clear()
         self.epoch_marker_labels.clear()
-        self.fig.canvas.draw_idle()
+        if self.is_interactive:
+            self.fig.canvas.draw_idle()
 
     def force_update(self):
         """Force an immediate redraw of the plot, bypassing the update_interval."""
-        self.fig.canvas.draw()
-        try:
-            self.fig.canvas.flush_events()
-        except Exception:
-            pass
+        if self.is_interactive:
+            self.fig.canvas.draw()
+            try:
+                self.fig.canvas.flush_events()
+            except Exception:
+                pass
 
     def save(self, filepath="training_progress.png"):
         self.fig.savefig(filepath, dpi=150, bbox_inches="tight")
@@ -187,6 +200,7 @@ class LivePlotter:
 
     def close(self):
         try:
-            plt.ioff()
+            if self.is_interactive:
+                plt.ioff()
         finally:
             plt.close(self.fig)
