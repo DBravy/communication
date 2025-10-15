@@ -49,8 +49,12 @@ def visualize_grid(grid, title="Grid"):
     print("└" + "─" * (grid.shape[1] * 2) + "┘")
 
 
-def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type='reconstruction', use_input_output_pairs=False):
+def visualize_reconstruction(model, dataloader, device, num_samples=3, task_type='reconstruction', use_input_output_pairs=False, plotter=None):
     """Show input grids, messages (if communication mode), and reconstructions/selections side by side."""
+    # Force plot update to ensure display is synchronized with current model state
+    if plotter is not None:
+        plotter.force_update()
+    
     model.eval()
     print("\n" + "="*80)
     if task_type == 'selection':
@@ -368,14 +372,17 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                     actual_h, actual_w = actual_sizes[sample_idx]
                     H, W = recon_logits.shape[2], recon_logits.shape[3]
                     
-                    # Get the target grid for reconstruction
+                    # Get the target grid for reconstruction and its actual size
                     if use_input_output_pairs:
                         # Reconstruct the selected output grid
                         target_grid_idx = target_indices[sample_idx]
                         target_grid = candidates_list[sample_idx][target_grid_idx:target_grid_idx+1, :H, :W]
+                        # Get actual size of the output grid (target candidate)
+                        recon_actual_h, recon_actual_w = candidates_sizes_list[sample_idx][target_grid_idx.item()]
                     else:
                         # Reconstruct the input grid (self-supervised)
                         target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                        recon_actual_h, recon_actual_w = input_sizes[sample_idx]
                     
                     # Compute reconstruction loss
                     logits_flat = recon_logits.permute(0, 2, 3, 1).reshape(-1, recon_logits.shape[1])
@@ -385,11 +392,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                     reconstruction_loss_total += recon_loss
                     num_reconstructions += 1
                     
-                    # Calculate reconstruction accuracy
+                    # Calculate reconstruction accuracy (only on actual non-padded pixels)
                     pred = recon_logits.argmax(dim=1).squeeze(0)
                     target = target_grid.squeeze(0)
-                    reconstruction_correct += (pred == target).sum().item()
-                    reconstruction_total += target.numel()
+                    reconstruction_correct += (pred[:recon_actual_h, :recon_actual_w] == target[:recon_actual_h, :recon_actual_w]).sum().item()
+                    reconstruction_total += recon_actual_h * recon_actual_w
             
             # Combine losses: selection loss for all samples + reconstruction loss for correct selections
             loss = batch_loss / len(selection_logits_list)
@@ -426,10 +433,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                     sample_loss = criterion(logits_flat, targets_flat)
                     batch_loss += sample_loss
                     
+                    # Only calculate accuracy on actual (non-padded) pixels
                     pred = logits.argmax(dim=1).squeeze(0)
                     target = target_grid.squeeze(0)
-                    batch_correct += (pred == target).sum().item()
-                    batch_total += target.numel()
+                    batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                    batch_total += actual_h * actual_w
                 
                 loss = batch_loss / len(logits_list)
             else:
@@ -459,10 +467,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                     sample_loss = criterion(logits_flat, targets_flat)
                     batch_loss += sample_loss
                     
+                    # Only calculate accuracy on actual (non-padded) pixels
                     pred = logits.argmax(dim=1).squeeze(0)
                     target = target_grid.squeeze(0)
-                    batch_correct += (pred == target).sum().item()
-                    batch_total += target.numel()
+                    batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                    batch_total += actual_h * actual_w
                 
                 loss = batch_loss / len(logits_list)
         
@@ -604,14 +613,17 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                         actual_h, actual_w = actual_sizes[sample_idx]
                         H, W = recon_logits.shape[2], recon_logits.shape[3]
                         
-                        # Get the target grid for reconstruction
+                        # Get the target grid for reconstruction and its actual size
                         if use_input_output_pairs:
                             # Reconstruct the selected output grid
                             target_grid_idx = target_indices[sample_idx]
                             target_grid = candidates_list[sample_idx][target_grid_idx:target_grid_idx+1, :H, :W]
+                            # Get actual size of the output grid (target candidate)
+                            recon_actual_h, recon_actual_w = candidates_sizes_list[sample_idx][target_grid_idx.item()]
                         else:
                             # Reconstruct the input grid (self-supervised)
                             target_grid = input_grids[sample_idx:sample_idx+1, :H, :W]
+                            recon_actual_h, recon_actual_w = input_sizes[sample_idx]
                         
                         # Compute reconstruction loss
                         logits_flat = recon_logits.permute(0, 2, 3, 1).reshape(-1, recon_logits.shape[1])
@@ -653,10 +665,11 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                         sample_loss = criterion(logits_flat, targets_flat)
                         batch_loss += sample_loss
                         
+                        # Only calculate accuracy on actual (non-padded) pixels
                         pred = logits.argmax(dim=1).squeeze(0)
                         target = target_grid.squeeze(0)
-                        batch_correct += (pred == target).sum().item()
-                        batch_total += target.numel()
+                        batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                        batch_total += actual_h * actual_w
                     
                     loss = batch_loss / len(logits_list)
                 else:
@@ -686,10 +699,11 @@ def validate(model, dataloader, criterion, device, task_type='reconstruction', u
                         sample_loss = criterion(logits_flat, targets_flat)
                         batch_loss += sample_loss
                         
+                        # Only calculate accuracy on actual (non-padded) pixels
                         pred = logits.argmax(dim=1).squeeze(0)
                         target = target_grid.squeeze(0)
-                        batch_correct += (pred == target).sum().item()
-                        batch_total += target.numel()
+                        batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                        batch_total += actual_h * actual_w
                     
                     loss = batch_loss / len(logits_list)
             
@@ -1025,7 +1039,7 @@ def main():
         print("\n🔍 INITIAL SELECTIONS (before training):")
     else:
         print("\n🔍 INITIAL RECONSTRUCTIONS (before training):")
-    visualize_reconstruction(model, val_loader, device, num_samples=2, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+    visualize_reconstruction(model, val_loader, device, num_samples=2, task_type=task_type, use_input_output_pairs=use_input_output_pairs, plotter=plotter)
     
     try:
         for epoch in range(config.NUM_EPOCHS):
@@ -1052,7 +1066,7 @@ def main():
             
             # Show reconstructions/selections every 5 epochs (or more frequently early on)
             if (epoch + 1) % 5 == 0 or epoch < 3:
-                visualize_reconstruction(model, val_loader, device, num_samples=3, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+                visualize_reconstruction(model, val_loader, device, num_samples=3, task_type=task_type, use_input_output_pairs=use_input_output_pairs, plotter=plotter)
             
             # Show messages every 10 epochs (only in communication mode)
             if (epoch + 1) % 10 == 0:
@@ -1092,7 +1106,7 @@ def main():
             print("\n🎯 FINAL SELECTIONS:")
         else:
             print("\n🎯 FINAL RECONSTRUCTIONS:")
-        visualize_reconstruction(model, val_loader, device, num_samples=5, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+        visualize_reconstruction(model, val_loader, device, num_samples=5, task_type=task_type, use_input_output_pairs=use_input_output_pairs, plotter=plotter)
         
         # Save final plot
         plotter.save(os.path.join(config.SAVE_DIR, 'training_progress.png'))

@@ -1277,10 +1277,11 @@ def train_worker():
                             sample_loss = criterion(logits_flat, targets_flat)
                             batch_loss += sample_loss
                             
+                            # Only calculate accuracy on actual (non-padded) pixels
                             pred = logits.argmax(dim=1).squeeze(0)
                             target = target_grid.squeeze(0)
-                            batch_correct += (pred == target).sum().item()
-                            batch_total += target.numel()
+                            batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                            batch_total += actual_h * actual_w
                         
                         loss = batch_loss / len(logits_list)
                     else:
@@ -1308,10 +1309,11 @@ def train_worker():
                             sample_loss = criterion(logits_flat, targets_flat)
                             batch_loss += sample_loss
                             
+                            # Only calculate accuracy on actual (non-padded) pixels
                             pred = logits.argmax(dim=1).squeeze(0)
                             target = target_grid.squeeze(0)
-                            batch_correct += (pred == target).sum().item()
-                            batch_total += target.numel()
+                            batch_correct += (pred[:actual_h, :actual_w] == target[:actual_h, :actual_w]).sum().item()
+                            batch_total += actual_h * actual_w
                         
                         loss = batch_loss / len(logits_list)
                 

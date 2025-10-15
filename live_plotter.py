@@ -173,6 +173,14 @@ class LivePlotter:
         self.epoch_marker_labels.clear()
         self.fig.canvas.draw_idle()
 
+    def force_update(self):
+        """Force an immediate redraw of the plot, bypassing the update_interval."""
+        self.fig.canvas.draw()
+        try:
+            self.fig.canvas.flush_events()
+        except Exception:
+            pass
+
     def save(self, filepath="training_progress.png"):
         self.fig.savefig(filepath, dpi=150, bbox_inches="tight")
         print(f"Plot saved to {filepath}")
