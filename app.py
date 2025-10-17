@@ -1413,7 +1413,7 @@ def train_worker():
                 time.sleep(0.01)
             
             # END OF EPOCH - Visualization happens here (every 2 epochs)
-            if epoch % 2 == 0:
+            if epoch % 1 == 0:
                 # Get visualization from validation set
                 for val_batch_data in train_loader: #from val_loader to train_loader
                     if task_type == 'selection':
