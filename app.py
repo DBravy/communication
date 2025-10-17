@@ -1356,10 +1356,12 @@ def train_worker():
                 loss.backward()
                 optimizer.step()
                 
+                # Statistics
                 total_loss += loss.item()
                 correct += batch_correct
                 total += batch_total
                 
+                # Calculate current metrics
                 avg_loss = total_loss / (batch_idx + 1)
                 accuracy = 100. * correct / total if total > 0 else 0.0
                 
@@ -1409,48 +1411,54 @@ def train_worker():
                     pass
                 
                 time.sleep(0.01)
-                
-                # Visualization at epoch level
-                if epoch % 2 == 0:  # Visualize every 2 epochs
-                    # Training batch visualization
+            
+            # END OF EPOCH - Visualization happens here (every 2 epochs)
+            if epoch % 2 == 0:
+                # Get visualization from validation set
+                for val_batch_data in train_loader: #from val_loader to train_loader
                     if task_type == 'selection':
-                        results = get_selections(model, batch_data, device, task_type)
+                        # Unpack validation batch
+                        if use_input_output_pairs:
+                            val_input_grids, val_input_sizes, val_output_grids, val_output_sizes, val_candidates_list, val_candidates_sizes_list, val_target_indices = val_batch_data
+                            val_input_grids = val_input_grids.to(device)
+                            val_candidates_list = [c.to(device) for c in val_candidates_list]
+                            val_target_indices = val_target_indices.to(device)
+                        else:
+                            val_grids, val_sizes, val_candidates_list, val_candidates_sizes_list, val_target_indices = val_batch_data
+                            val_grids = val_grids.to(device)
+                            val_candidates_list = [c.to(device) for c in val_candidates_list]
+                            val_target_indices = val_target_indices.to(device)
+                            val_input_grids = val_grids
+                            val_input_sizes = val_sizes
+                        
+                        results = get_selections(model, val_batch_data, device, task_type)
                     elif task_type == 'puzzle_classification':
-                        results = get_classification_preview(model, input_grids, input_sizes, device)
-                    else:
-                        results = get_reconstructions(model, input_grids, input_sizes, device, num_samples=1)
+                        if use_input_output_pairs:
+                            val_input_grids = val_batch_data[0].to(device)
+                            val_input_sizes = val_batch_data[1]
+                        else:
+                            val_grids, val_sizes, val_labels = val_batch_data
+                            val_input_grids = val_grids.to(device)
+                            val_input_sizes = val_sizes
+                        
+                        results = get_classification_preview(model, val_input_grids, val_input_sizes, device)
+                    else:  # reconstruction
+                        if use_input_output_pairs:
+                            val_input_grids = val_batch_data[0].to(device)
+                            val_input_sizes = val_batch_data[1]
+                        else:
+                            val_grids, val_sizes = val_batch_data
+                            val_input_grids = val_grids.to(device)
+                            val_input_sizes = val_sizes
+                        
+                        results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
+                    
                     reconstructions_queue.put({
                         'results': results,
                         'epoch': epoch + 1,
-                        'batch': batch_idx + 1
+                        'batch': 'end'  # Indicate this is end-of-epoch visualization
                     })
-                    
-                    # Validation batch visualization
-                    # for val_batch in val_loader:
-                    #     if task_type == 'selection':
-                    #         results = get_selections(model, val_batch, device, task_type)
-                    #     elif task_type == 'puzzle_classification':
-                    #         if use_input_output_pairs:
-                    #             val_grids = val_batch[0].to(device)
-                    #             val_sizes = val_batch[1]
-                    #         else:
-                    #             val_grids, val_sizes, val_labels = val_batch
-                    #             val_grids = val_grids.to(device)
-                    #         results = get_classification_preview(model, val_grids, val_sizes, device)
-                    #     else:
-                    #         if use_input_output_pairs:
-                    #             val_input_grids = val_batch[0].to(device)
-                    #             val_input_sizes = val_batch[1]
-                    #         else:
-                    #             val_input_grids, val_input_sizes = val_batch
-                    #             val_input_grids = val_input_grids.to(device)
-                    #         results = get_reconstructions(model, val_input_grids, val_input_sizes, device, num_samples=1)
-                    #     reconstructions_queue.put({
-                    #         'results': results,
-                    #         'epoch': epoch + 1,
-                    #         'batch': batch_idx + 1
-                    #     })
-                    #     break
+                    break  # Only use first validation batch
                         
         training_state['running'] = False
         training_state['mode'] = None
@@ -1460,7 +1468,6 @@ def train_worker():
         training_state['running'] = False
         training_state['mode'] = None
         metrics_queue.put({'status': 'error', 'message': str(e)})
-
 
 def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_split, epochs, lr, batch_size, early_stop_threshold, receiver_lr=None):
     """Background batch testing worker - finetunes and solves multiple puzzles."""
