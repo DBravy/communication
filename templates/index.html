@@ -599,26 +599,51 @@
                 <div class="config-row">
                     <div class="config-group">
                         <label for="datasetVersion">Dataset Version:</label>
-                        <select id="datasetVersion" onchange="markConfigDirty()">
+                        <select id="datasetVersion" onchange="markConfigDirty(); updateDatasetOptionsVisibility();">
                             <option value="V1">V1 (400 training / 400 eval)</option>
                             <option value="V2" selected>V2 (1000 training / 120 eval)</option>
                         </select>
                     </div>
-                    <div class="config-group">
+                    <div class="config-group" id="datasetSplitGroup">
                         <label for="datasetSplit">Dataset Split:</label>
                         <select id="datasetSplit" onchange="markConfigDirty()">
                             <option value="training" selected>Training</option>
                             <option value="evaluation">Evaluation</option>
                         </select>
                     </div>
-                    <div class="config-group">
+                    <div class="config-group" id="useCombinedSplitsGroup">
                         <label>
-                            <input type="checkbox" id="useCombinedSplits" onchange="markConfigDirty()">
+                            <input type="checkbox" id="useCombinedSplits" onchange="markConfigDirty(); updateDatasetOptionsVisibility();">
                             Use Combined Splits (Train + Eval)
                         </label>
                     </div>
                 </div>
-                <div class="config-row">
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="useAllDatasets" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="useAllDatasets" onchange="markConfigDirty(); updateDatasetOptionsVisibility();" style="width: 18px; height: 18px; cursor: pointer;">
+                            <span>🌍 Use ALL Datasets (V1+V2, Train+Eval) with Holdout</span>
+                        </label>
+                    </div>
+                </div>
+                <div id="holdoutSettings" style="display: none; margin-top: 15px; padding: 15px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;">
+                    <div style="margin-bottom: 10px; font-size: 13px; color: #92400e;">
+                        ℹ️ When enabled, loads all 4 dataset categories (V1/train, V1/eval, V2/train, V2/eval) and holds out a subset for generalization testing
+                    </div>
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="holdoutGridsPerCategory">Holdout per Category:</label>
+                            <input type="number" id="holdoutGridsPerCategory" min="1" max="1000" value="25" onchange="markConfigDirty()">
+                            <span style="font-size: 12px; color: #92400e;">(25 × 4 = 100 total)</span>
+                        </div>
+                        <div class="config-group">
+                            <label for="holdoutSeed">Random Seed:</label>
+                            <input type="number" id="holdoutSeed" min="0" max="99999" value="42" onchange="markConfigDirty()">
+                            <span style="font-size: 12px; color: #92400e;">(for reproducible holdout)</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="config-row" style="margin-top: 15px;">
                     <div class="config-group">
                         <label for="maxGrids">Max Grids:</label>
                         <input type="number" id="maxGrids" min="0" max="100000" step="100" placeholder="None (all grids)" onchange="markConfigDirty()">
@@ -896,6 +921,9 @@
                 document.getElementById('datasetVersion').value = data.dataset_version || 'V2';
                 document.getElementById('datasetSplit').value = data.dataset_split || 'training';
                 document.getElementById('useCombinedSplits').checked = data.use_combined_splits || false;
+                document.getElementById('useAllDatasets').checked = data.use_all_datasets || false;
+                document.getElementById('holdoutGridsPerCategory').value = data.holdout_grids_per_category || 25;
+                document.getElementById('holdoutSeed').value = data.holdout_seed || 42;
                 document.getElementById('maxGrids').value = data.max_grids || 0;
                 if (data.filter_grid_size && data.filter_grid_size.length === 2) {
                     document.getElementById('filterGridHeight').value = data.filter_grid_size[0];
@@ -933,6 +961,7 @@
                 
                 updateTaskUILabels();
                 updateBottleneckVisibility();
+                updateDatasetOptionsVisibility();
                 configDirty = false;
                 updateConfigStatus();
                 
@@ -965,6 +994,38 @@
                 commSection.style.display = 'block';
             } else {
                 commSection.style.display = 'none';
+            }
+        }
+        
+        function updateDatasetOptionsVisibility() {
+            const useAllDatasets = document.getElementById('useAllDatasets').checked;
+            const holdoutSettings = document.getElementById('holdoutSettings');
+            const datasetVersionSelect = document.getElementById('datasetVersion');
+            const datasetSplitSelect = document.getElementById('datasetSplit');
+            const useCombinedSplitsCheckbox = document.getElementById('useCombinedSplits');
+            const datasetSplitGroup = document.getElementById('datasetSplitGroup');
+            const useCombinedSplitsGroup = document.getElementById('useCombinedSplitsGroup');
+            
+            if (useAllDatasets) {
+                // Show holdout settings
+                holdoutSettings.style.display = 'block';
+                
+                // Disable/gray out dataset options (they're ignored when using all datasets)
+                datasetVersionSelect.disabled = true;
+                datasetSplitSelect.disabled = true;
+                useCombinedSplitsCheckbox.disabled = true;
+                datasetSplitGroup.style.opacity = '0.5';
+                useCombinedSplitsGroup.style.opacity = '0.5';
+            } else {
+                // Hide holdout settings
+                holdoutSettings.style.display = 'none';
+                
+                // Re-enable dataset options
+                datasetVersionSelect.disabled = false;
+                datasetSplitSelect.disabled = false;
+                useCombinedSplitsCheckbox.disabled = false;
+                datasetSplitGroup.style.opacity = '1';
+                useCombinedSplitsGroup.style.opacity = '1';
             }
         }
         
@@ -1031,6 +1092,9 @@
             const datasetVersion = document.getElementById('datasetVersion').value;
             const datasetSplit = document.getElementById('datasetSplit').value;
             const useCombinedSplits = document.getElementById('useCombinedSplits').checked;
+            const useAllDatasets = document.getElementById('useAllDatasets').checked;
+            const holdoutGridsPerCategory = document.getElementById('holdoutGridsPerCategory').value;
+            const holdoutSeed = document.getElementById('holdoutSeed').value;
             const maxGrids = document.getElementById('maxGrids').value;
             const filterGridHeight = document.getElementById('filterGridHeight').value;
             const filterGridWidth = document.getElementById('filterGridWidth').value;
@@ -1090,6 +1154,9 @@
                     dataset_version: datasetVersion,
                     dataset_split: datasetSplit,
                     use_combined_splits: useCombinedSplits,
+                    use_all_datasets: useAllDatasets,
+                    holdout_grids_per_category: parseInt(holdoutGridsPerCategory),
+                    holdout_seed: parseInt(holdoutSeed),
                     max_grids: maxGrids ? parseInt(maxGrids) : null,
                     filter_grid_size: filterGridSize,
                     hidden_dim: parseInt(hiddenDim),

@@ -29,12 +29,12 @@ def get_data_path(dataset_version='V2', dataset_split='training'):
         return config.DATA_PATH
 
 
-def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs=False):
+def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs=False, use_all_datasets=False, holdout_per_category=25, holdout_seed=42):
     """Load dataset(s) based on split configuration.
     
     Args:
-        dataset_version: 'V1' or 'V2'
-        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True)
+        dataset_version: 'V1' or 'V2' (ignored if use_all_datasets=True)
+        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True or use_all_datasets=True)
         use_combined_splits: If True, load and combine both training and evaluation splits
         min_size: Minimum grid size
         filter_size: Filter for specific grid size
@@ -42,10 +42,28 @@ def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits
         num_distractors: Number of distractor grids
         track_puzzle_ids: Whether to track puzzle IDs
         use_input_output_pairs: Whether to use input-output pairs
+        use_all_datasets: If True, load ALL datasets (V1+V2, train+eval) with holdout for generalization
+        holdout_per_category: Number of grids to hold out from each category for generalization
+        holdout_seed: Random seed for holdout selection
     
     Returns:
-        Combined dataset
+        Combined dataset (or tuple of (training_dataset, holdout_dataset) if use_all_datasets=True)
     """
+    # Import the function from train.py to avoid code duplication
+    from train import load_all_datasets_with_holdout
+    
+    # NEW MODE: Load all datasets with holdout
+    if use_all_datasets:
+        return load_all_datasets_with_holdout(
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs,
+            holdout_per_category=holdout_per_category,
+            holdout_seed=holdout_seed
+        )
     if not use_combined_splits:
         # Load single split as before
         data_path = get_data_path(dataset_version, dataset_split)
@@ -163,6 +181,12 @@ def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, traini
         'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         
         # Data configuration
+        'dataset_version': training_state.get('dataset_version', 'V2'),
+        'dataset_split': training_state.get('dataset_split', 'training'),
+        'use_combined_splits': training_state.get('use_combined_splits', False),
+        'use_all_datasets': training_state.get('use_all_datasets', False),
+        'holdout_grids_per_category': training_state.get('holdout_grids_per_category', 25),
+        'holdout_seed': training_state.get('holdout_seed', 42),
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         
@@ -212,6 +236,9 @@ training_state = {
     'dataset_version': getattr(config, 'DATASET_VERSION', 'V2'),  # 'V1' or 'V2'
     'dataset_split': getattr(config, 'DATASET_SPLIT', 'training'),  # 'training' or 'evaluation'
     'use_combined_splits': getattr(config, 'USE_COMBINED_SPLITS', False),  # If True, use both training and evaluation
+    'use_all_datasets': getattr(config, 'USE_ALL_DATASETS', False),  # If True, use ALL datasets with holdout
+    'holdout_grids_per_category': getattr(config, 'HOLDOUT_GRIDS_PER_CATEGORY', 25),
+    'holdout_seed': getattr(config, 'HOLDOUT_SEED', 42),
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
     # Puzzle solving configuration
@@ -718,8 +745,8 @@ def pretrain_worker():
             num_distractors_for_dataset = 0
             track_puzzle_ids = False
         
-        # Load ARC dataset (with optional combined splits)
-        arc_dataset = load_dataset_with_splits(
+        # Load ARC dataset (with optional combined splits or all datasets)
+        dataset_result = load_dataset_with_splits(
             dataset_version=training_state['dataset_version'],
             dataset_split=training_state['dataset_split'],
             use_combined_splits=training_state.get('use_combined_splits', False),
@@ -727,8 +754,18 @@ def pretrain_worker():
             filter_size=training_state['filter_grid_size'],
             max_grids=training_state['max_grids'],
             num_distractors=num_distractors_for_dataset,
-            track_puzzle_ids=track_puzzle_ids
+            track_puzzle_ids=track_puzzle_ids,
+            use_all_datasets=training_state.get('use_all_datasets', False),
+            holdout_per_category=training_state.get('holdout_grids_per_category', 25),
+            holdout_seed=training_state.get('holdout_seed', 42)
         )
+        
+        # Handle return value - either a single dataset or (training, holdout) tuple
+        if training_state.get('use_all_datasets', False):
+            arc_dataset, _ = dataset_result  # Ignore holdout for pretraining
+            print(f'[PRETRAIN] Using training portion of ALL datasets mode')
+        else:
+            arc_dataset = dataset_result
         
         # Create encoder
         encoder = ARCEncoder(
@@ -1173,8 +1210,8 @@ def train_worker():
         track_puzzle_ids = task_type == 'puzzle_classification'
         use_input_output_pairs = training_state.get('use_input_output_pairs', False)
         
-        # Load dataset (with optional combined splits)
-        dataset = load_dataset_with_splits(
+        # Load dataset (with optional combined splits or all datasets)
+        dataset_result = load_dataset_with_splits(
             dataset_version=training_state['dataset_version'],
             dataset_split=training_state['dataset_split'],
             use_combined_splits=training_state.get('use_combined_splits', False),
@@ -1183,8 +1220,19 @@ def train_worker():
             max_grids=training_state['max_grids'],
             num_distractors=num_distractors,
             track_puzzle_ids=track_puzzle_ids,
-            use_input_output_pairs=use_input_output_pairs
+            use_input_output_pairs=use_input_output_pairs,
+            use_all_datasets=training_state.get('use_all_datasets', False),
+            holdout_per_category=training_state.get('holdout_grids_per_category', 25),
+            holdout_seed=training_state.get('holdout_seed', 42)
         )
+        
+        # Handle return value - either a single dataset or (training, holdout) tuple
+        if training_state.get('use_all_datasets', False):
+            dataset, holdout_dataset = dataset_result
+            print(f'[MAIN TRAIN] Using ALL datasets mode with {len(holdout_dataset)} grids held out for generalization')
+        else:
+            dataset = dataset_result
+            holdout_dataset = None
         
         # For puzzle classification, get number of classes
         num_classes = None
@@ -1580,7 +1628,7 @@ def train_worker():
                 config.GENERALIZATION_TEST_MAX_GRIDS = training_state.get('generalization_test_max_grids', 100)
                 
                 try:
-                    gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+                    gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs, holdout_dataset=holdout_dataset)
                     if gen_results is not None:
                         # Add epoch info
                         gen_results['epoch'] = epoch + 1
@@ -2481,6 +2529,9 @@ def get_task_config():
         'dataset_version': training_state['dataset_version'],
         'dataset_split': training_state['dataset_split'],
         'use_combined_splits': training_state.get('use_combined_splits', False),
+        'use_all_datasets': training_state.get('use_all_datasets', False),
+        'holdout_grids_per_category': training_state.get('holdout_grids_per_category', 25),
+        'holdout_seed': training_state.get('holdout_seed', 42),
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         # Puzzle solving configuration
@@ -2546,6 +2597,12 @@ def set_task_config():
         training_state['dataset_split'] = data['dataset_split']
     if 'use_combined_splits' in data:
         training_state['use_combined_splits'] = bool(data['use_combined_splits'])
+    if 'use_all_datasets' in data:
+        training_state['use_all_datasets'] = bool(data['use_all_datasets'])
+    if 'holdout_grids_per_category' in data:
+        training_state['holdout_grids_per_category'] = int(data['holdout_grids_per_category'])
+    if 'holdout_seed' in data:
+        training_state['holdout_seed'] = int(data['holdout_seed'])
     if 'max_grids' in data:
         training_state['max_grids'] = int(data['max_grids']) if data['max_grids'] else None
     if 'filter_grid_size' in data:
@@ -2635,6 +2692,9 @@ def set_task_config():
         'dataset_version': training_state['dataset_version'],
         'dataset_split': training_state['dataset_split'],
         'use_combined_splits': training_state.get('use_combined_splits', False),
+        'use_all_datasets': training_state.get('use_all_datasets', False),
+        'holdout_grids_per_category': training_state.get('holdout_grids_per_category', 25),
+        'holdout_seed': training_state.get('holdout_seed', 42),
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         'rule_dim': training_state['rule_dim'],

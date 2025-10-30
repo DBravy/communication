@@ -16,12 +16,140 @@ from live_plotter import LivePlotter
 from puzzle_training_dataset import ARCPuzzleTrainingDataset, collate_fn_puzzle_training
 
 
-def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs):
+def load_all_datasets_with_holdout(min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs, holdout_per_category=25, holdout_seed=42):
+    """Load all datasets (V1+V2, training+evaluation) with holdout grids for generalization.
+    
+    Args:
+        min_size: Minimum grid size
+        filter_size: Filter for specific grid size
+        max_grids: Maximum number of grids per split (None = all)
+        num_distractors: Number of distractor grids
+        track_puzzle_ids: Whether to track puzzle IDs
+        use_input_output_pairs: Whether to use input-output pairs
+        holdout_per_category: Number of grids to hold out from each category
+        holdout_seed: Random seed for consistent holdout selection
+    
+    Returns:
+        Tuple of (training_dataset, holdout_dataset)
+    """
+    import random
+    import numpy as np
+    from torch.utils.data import Subset
+    
+    print('='*80)
+    print('LOADING ALL DATASETS WITH HOLDOUT')
+    print('='*80)
+    print(f'Holdout: {holdout_per_category} grids per category (4 categories = {holdout_per_category * 4} total)')
+    print(f'Random seed: {holdout_seed}')
+    print()
+    
+    # Set random seed for reproducibility
+    random.seed(holdout_seed)
+    np.random.seed(holdout_seed)
+    
+    # Define all 4 categories
+    categories = [
+        ('V1', 'training'),
+        ('V1', 'evaluation'),
+        ('V2', 'training'),
+        ('V2', 'evaluation')
+    ]
+    
+    all_datasets = []
+    holdout_indices_all = []  # Global indices for holdout
+    current_offset = 0
+    
+    # Load each category and select holdout grids
+    for version, split in categories:
+        data_path = os.path.join(version, 'data', split)
+        
+        if not os.path.exists(data_path):
+            print(f'Warning: {data_path} not found, skipping...')
+            continue
+        
+        print(f'Loading {version}/{split}...')
+        
+        # Load the dataset
+        dataset = ARCDataset(
+            data_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+        
+        # Randomly select holdout indices for this category
+        n_grids = len(dataset)
+        n_holdout = min(holdout_per_category, n_grids)
+        
+        if n_grids == 0:
+            print(f'  Warning: No grids found in {version}/{split}')
+            continue
+        
+        # Select random indices for holdout
+        local_indices = list(range(n_grids))
+        random.shuffle(local_indices)
+        holdout_local = local_indices[:n_holdout]
+        
+        # Convert to global indices
+        holdout_global = [idx + current_offset for idx in holdout_local]
+        holdout_indices_all.extend(holdout_global)
+        
+        print(f'  Loaded {n_grids} grids, holding out {n_holdout} for generalization')
+        
+        all_datasets.append(dataset)
+        current_offset += n_grids
+    
+    # Combine all datasets
+    from torch.utils.data import ConcatDataset
+    combined_dataset = ConcatDataset(all_datasets)
+    
+    print()
+    print(f'Total grids: {len(combined_dataset)}')
+    print(f'Holdout grids: {len(holdout_indices_all)}')
+    print(f'Training grids: {len(combined_dataset) - len(holdout_indices_all)}')
+    
+    # Create training dataset (all indices except holdout)
+    all_indices = set(range(len(combined_dataset)))
+    holdout_indices_set = set(holdout_indices_all)
+    training_indices = sorted(list(all_indices - holdout_indices_set))
+    
+    training_dataset = Subset(combined_dataset, training_indices)
+    holdout_dataset = Subset(combined_dataset, holdout_indices_all)
+    
+    # Handle puzzle_id_map if tracking puzzle IDs
+    if track_puzzle_ids:
+        # Merge puzzle_id_maps from all datasets
+        combined_puzzle_id_map = {}
+        next_id = 0
+        
+        for dataset in all_datasets:
+            if hasattr(dataset, 'puzzle_id_map'):
+                for puzzle_id, _ in dataset.puzzle_id_map.items():
+                    if puzzle_id not in combined_puzzle_id_map:
+                        combined_puzzle_id_map[puzzle_id] = next_id
+                        next_id += 1
+        
+        # Attach to both training and holdout datasets
+        training_dataset.puzzle_id_map = combined_puzzle_id_map
+        holdout_dataset.puzzle_id_map = combined_puzzle_id_map
+        
+        print(f'Total unique puzzles: {len(combined_puzzle_id_map)}')
+    
+    print('='*80)
+    print()
+    
+    return training_dataset, holdout_dataset
+
+
+def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs, use_all_datasets=False, holdout_per_category=25, holdout_seed=42):
     """Load dataset(s) based on split configuration.
     
     Args:
-        dataset_version: 'V1' or 'V2'
-        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True)
+        dataset_version: 'V1' or 'V2' (ignored if use_all_datasets=True)
+        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True or use_all_datasets=True)
         use_combined_splits: If True, load and combine both training and evaluation splits
         min_size: Minimum grid size
         filter_size: Filter for specific grid size
@@ -29,10 +157,25 @@ def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits
         num_distractors: Number of distractor grids
         track_puzzle_ids: Whether to track puzzle IDs
         use_input_output_pairs: Whether to use input-output pairs
+        use_all_datasets: If True, load ALL datasets (V1+V2, train+eval) with holdout for generalization
+        holdout_per_category: Number of grids to hold out from each category for generalization
+        holdout_seed: Random seed for holdout selection
     
     Returns:
-        Combined dataset
+        Combined dataset (or tuple of (training_dataset, holdout_dataset) if use_all_datasets=True)
     """
+    # NEW MODE: Load all datasets with holdout
+    if use_all_datasets:
+        return load_all_datasets_with_holdout(
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs,
+            holdout_per_category=holdout_per_category,
+            holdout_seed=holdout_seed
+        )
     if not use_combined_splits:
         # Load single split as before
         if dataset_version in ['V1', 'V2']:
@@ -614,53 +757,70 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
     return total_loss / len(dataloader), 100. * correct / total if total > 0 else 0.0
 
 
-def run_generalization_test(model, device, task_type='reconstruction', use_input_output_pairs=False):
+def run_generalization_test(model, device, task_type='reconstruction', use_input_output_pairs=False, holdout_dataset=None):
     """
     Test model on unseen dataset for generalization evaluation.
     Returns dict with metrics and saves results to JSON file.
+    
+    Args:
+        model: The model to test
+        device: Device to run on
+        task_type: Type of task
+        use_input_output_pairs: Whether using input-output pairs
+        holdout_dataset: Pre-loaded holdout dataset (for USE_ALL_DATASETS mode)
     """
     # Check if generalization testing is enabled
     if not getattr(config, 'GENERALIZATION_TEST_ENABLED', False):
         return None
     
-    # Get generalization test dataset configuration
-    gen_dataset_version = getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2')
-    gen_dataset_split = getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training')
-    gen_max_grids = getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100)
-    
-    # Construct path to generalization test dataset
-    if gen_dataset_version in ['V1', 'V2']:
-        gen_data_path = os.path.join(gen_dataset_version, 'data', gen_dataset_split)
-    else:
-        print(f"Warning: Unknown generalization test dataset version: {gen_dataset_version}")
-        return None
-    
-    # Check if path exists
-    if not os.path.exists(gen_data_path):
-        print(f"Warning: Generalization test dataset not found at {gen_data_path}")
-        return None
-    
     print(f'\n{"="*80}')
-    print(f'GENERALIZATION TEST: Testing on {gen_dataset_version}/{gen_dataset_split}')
-    print(f'{"="*80}')
     
-    # Load generalization test dataset
-    num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
-    track_puzzle_ids = task_type == 'puzzle_classification'
-    
-    try:
-        gen_dataset = ARCDataset(
-            gen_data_path,
-            min_size=config.MIN_GRID_SIZE,
-            filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
-            max_grids=gen_max_grids,
-            num_distractors=num_distractors,
-            track_puzzle_ids=track_puzzle_ids,
-            use_input_output_pairs=use_input_output_pairs
-        )
-    except Exception as e:
-        print(f"Error loading generalization test dataset: {e}")
-        return None
+    # If holdout_dataset is provided (USE_ALL_DATASETS mode), use it directly
+    if holdout_dataset is not None:
+        print(f'GENERALIZATION TEST: Testing on HOLDOUT grids')
+        print(f'{"="*80}')
+        gen_dataset = holdout_dataset
+        gen_dataset_version = 'ALL (V1+V2)'
+        gen_dataset_split = 'holdout'
+    else:
+        # Original behavior: load a separate generalization test dataset
+        # Get generalization test dataset configuration
+        gen_dataset_version = getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2')
+        gen_dataset_split = getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training')
+        gen_max_grids = getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100)
+        
+        # Construct path to generalization test dataset
+        if gen_dataset_version in ['V1', 'V2']:
+            gen_data_path = os.path.join(gen_dataset_version, 'data', gen_dataset_split)
+        else:
+            print(f"Warning: Unknown generalization test dataset version: {gen_dataset_version}")
+            return None
+        
+        # Check if path exists
+        if not os.path.exists(gen_data_path):
+            print(f"Warning: Generalization test dataset not found at {gen_data_path}")
+            return None
+        
+        print(f'GENERALIZATION TEST: Testing on {gen_dataset_version}/{gen_dataset_split}')
+        print(f'{"="*80}')
+        
+        # Load generalization test dataset
+        num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
+        track_puzzle_ids = task_type == 'puzzle_classification'
+        
+        try:
+            gen_dataset = ARCDataset(
+                gen_data_path,
+                min_size=config.MIN_GRID_SIZE,
+                filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
+                max_grids=gen_max_grids,
+                num_distractors=num_distractors,
+                track_puzzle_ids=track_puzzle_ids,
+                use_input_output_pairs=use_input_output_pairs
+            )
+        except Exception as e:
+            print(f"Error loading generalization test dataset: {e}")
+            return None
     
     # Create dataloader
     from functools import partial
@@ -1217,10 +1377,11 @@ def main():
     # Load dataset
     print('Loading dataset...')
     use_combined_splits = getattr(config, 'USE_COMBINED_SPLITS', False)
+    use_all_datasets = getattr(config, 'USE_ALL_DATASETS', False)
     dataset_version = getattr(config, 'DATASET_VERSION', 'V2')
     dataset_split = getattr(config, 'DATASET_SPLIT', 'training')
     
-    dataset = load_dataset_with_splits(
+    dataset_result = load_dataset_with_splits(
         dataset_version=dataset_version,
         dataset_split=dataset_split,
         use_combined_splits=use_combined_splits,
@@ -1229,8 +1390,19 @@ def main():
         max_grids=getattr(config, 'MAX_GRIDS', None),
         num_distractors=num_distractors,
         track_puzzle_ids=track_puzzle_ids,
-        use_input_output_pairs=use_input_output_pairs
+        use_input_output_pairs=use_input_output_pairs,
+        use_all_datasets=use_all_datasets,
+        holdout_per_category=getattr(config, 'HOLDOUT_GRIDS_PER_CATEGORY', 25),
+        holdout_seed=getattr(config, 'HOLDOUT_SEED', 42)
     )
+    
+    # Handle return value - either a single dataset or (training, holdout) tuple
+    if use_all_datasets:
+        dataset, holdout_dataset = dataset_result
+        print(f'\n✓ Using ALL datasets mode with {len(holdout_dataset)} grids held out for generalization')
+    else:
+        dataset = dataset_result
+        holdout_dataset = None
     
     # For puzzle classification, get number of classes
     num_classes = None
@@ -1404,7 +1576,7 @@ def main():
             # Run generalization test every N epochs
             gen_interval = getattr(config, 'GENERALIZATION_TEST_INTERVAL', 20)
             if getattr(config, 'GENERALIZATION_TEST_ENABLED', False) and (epoch + 1) % gen_interval == 0:
-                gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+                gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs, holdout_dataset=holdout_dataset)
                 if gen_results is not None:
                     # Add epoch info
                     gen_results['epoch'] = epoch + 1
