@@ -843,6 +843,15 @@
             </div>
         </div>
 
+        <!-- Generalization Test Results -->
+        <div class="info-box" id="generalizationTestSection" style="display: none; margin-top: 30px; background: #f0fdf4; border-left: 4px solid #10b981;">
+            <h3 style="color: #047857; margin-bottom: 15px;">📊 Generalization Test Results (Testing on Unseen Dataset)</h3>
+            <div id="generalizationTestInfo" style="color: #065f46; margin-bottom: 15px;"></div>
+            <div id="generalizationTestResults" style="color: #065f46;">
+                <p>No generalization test results available yet.</p>
+            </div>
+        </div>
+
         <div class="results-section" id="resultsSection">
             <h2 class="section-title" id="resultsTitle">Live Results</h2>
             <div class="results-grid" id="resultsContainer">
@@ -1558,7 +1567,10 @@
                         document.getElementById('modeBadge').textContent = 'PRETRAINING';
                         document.getElementById('accuracyLabel').textContent = 'Classification Accuracy (Moving Avg)';
                         document.getElementById('resultsSection').classList.add('hidden');
+                        // Don't hide generalization section - let it show dynamically as results come in
                         resetCharts();
+                        // Immediately check for generalization results (will hide if none available)
+                        updateGeneralizationTestResults();
                     }
                 })
                 .catch(error => console.error('Error:', error));
@@ -1598,7 +1610,10 @@
                         } else {
                             document.getElementById('resultsSection').classList.remove('hidden');
                         }
+                        // Don't hide generalization section - let it show dynamically as results come in
                         resetCharts();
+                        // Immediately check for generalization results (will hide if none available)
+                        updateGeneralizationTestResults();
                     }
                 })
                 .catch(error => console.error('Error:', error));
@@ -1740,6 +1755,87 @@
         eventSource.onerror = function(error) {
             console.error('EventSource error:', error);
         };
+        
+        // Function to fetch and display generalization test results
+        function updateGeneralizationTestResults() {
+            fetch('/generalization_test_results')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Generalization test data:', data);
+                    if (data.available && data.data && data.data.history && data.data.history.length > 0) {
+                        const section = document.getElementById('generalizationTestSection');
+                        const info = document.getElementById('generalizationTestInfo');
+                        const results = document.getElementById('generalizationTestResults');
+                        
+                        section.style.display = 'block';
+                        
+                        // Display metadata
+                        info.innerHTML = `
+                            <p><strong>Training Dataset:</strong> ${data.data.training_dataset}/${data.data.training_split}</p>
+                            <p><strong>Testing Dataset:</strong> ${data.data.history[0].dataset_version}/${data.data.history[0].dataset_split}</p>
+                            <p><strong>Task Type:</strong> ${data.data.task_type}</p>
+                            <p><strong>Bottleneck Type:</strong> ${data.data.bottleneck_type}</p>
+                        `;
+                        
+                        // Display results table
+                        let tableHTML = `
+                            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                                <thead>
+                                    <tr style="background: #dcfce7; border-bottom: 2px solid #86efac;">
+                                        <th style="padding: 8px; text-align: left;">Epoch</th>
+                                        <th style="padding: 8px; text-align: left;">Gen Test Loss</th>
+                                        <th style="padding: 8px; text-align: left;">Gen Test Acc</th>
+                                        <th style="padding: 8px; text-align: left;">Train Loss</th>
+                                        <th style="padding: 8px; text-align: left;">Train Acc</th>
+                                        <th style="padding: 8px; text-align: left;">Val Loss</th>
+                                        <th style="padding: 8px; text-align: left;">Val Acc</th>
+                                        <th style="padding: 8px; text-align: left;"># Test Grids</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        // Show most recent tests (last 10)
+                        const recentTests = data.data.history.slice(-10).reverse();
+                        recentTests.forEach(test => {
+                            tableHTML += `
+                                <tr style="border-bottom: 1px solid #d1fae5;">
+                                    <td style="padding: 8px;">${test.epoch || 'N/A'}</td>
+                                    <td style="padding: 8px; font-weight: 600;">${test.loss ? test.loss.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px; font-weight: 600;">${test.accuracy ? test.accuracy.toFixed(2) + '%' : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.train_loss ? test.train_loss.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.train_acc ? test.train_acc.toFixed(2) + '%' : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.val_loss ? test.val_loss.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.val_acc ? test.val_acc.toFixed(2) + '%' : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.num_grids || 'N/A'}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        tableHTML += `
+                                </tbody>
+                            </table>
+                        `;
+                        
+                        if (data.data.history.length > 10) {
+                            tableHTML += `<p style="margin-top: 10px; font-size: 12px; color: #6b7280;">Showing most recent 10 of ${data.data.history.length} tests</p>`;
+                        }
+                        
+                        results.innerHTML = tableHTML;
+                    } else {
+                        // Hide section if no results available
+                        document.getElementById('generalizationTestSection').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching generalization test results:', error);
+                    document.getElementById('generalizationTestSection').style.display = 'none';
+                });
+        }
+        
+        // Update generalization test results every 10 seconds
+        updateGeneralizationTestResults();
+        setInterval(updateGeneralizationTestResults, 10000);
         
         setInterval(() => {
             fetch('/status')

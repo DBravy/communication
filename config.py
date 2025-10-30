@@ -63,6 +63,13 @@ DEVICE = 'cuda'  # or 'cuda'
 LOG_INTERVAL = 10
 SAVE_DIR = 'checkpoints'
 
+# Generalization Testing (test on unseen dataset during training)
+GENERALIZATION_TEST_ENABLED = True  # Whether to run generalization tests on unseen dataset
+GENERALIZATION_TEST_DATASET_VERSION = 'V2'  # Dataset version to test on (e.g., 'V2' when training on 'V1')
+GENERALIZATION_TEST_DATASET_SPLIT = 'training'  # Split to use for generalization testing
+GENERALIZATION_TEST_INTERVAL = 20  # Run generalization test every N epochs
+GENERALIZATION_TEST_MAX_GRIDS = 100  # Maximum number of grids to test (None = all grids)
+
 # Memory Management (to prevent issues during long training sessions)
 MAX_PLOT_POINTS = 10000  # Maximum data points kept in memory for plotting (older data is downsampled)
 MAX_EPOCH_MARKERS = 50   # Maximum epoch markers displayed on plots (older ones are removed)

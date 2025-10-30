@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import os
+import time
+import json
 from tqdm import tqdm
 
 import config
@@ -504,6 +506,89 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
             pbar.set_postfix(postfix)
     
     return total_loss / len(dataloader), 100. * correct / total if total > 0 else 0.0
+
+
+def run_generalization_test(model, device, task_type='reconstruction', use_input_output_pairs=False):
+    """
+    Test model on unseen dataset for generalization evaluation.
+    Returns dict with metrics and saves results to JSON file.
+    """
+    # Check if generalization testing is enabled
+    if not getattr(config, 'GENERALIZATION_TEST_ENABLED', False):
+        return None
+    
+    # Get generalization test dataset configuration
+    gen_dataset_version = getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2')
+    gen_dataset_split = getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training')
+    gen_max_grids = getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100)
+    
+    # Construct path to generalization test dataset
+    if gen_dataset_version in ['V1', 'V2']:
+        gen_data_path = os.path.join(gen_dataset_version, 'data', gen_dataset_split)
+    else:
+        print(f"Warning: Unknown generalization test dataset version: {gen_dataset_version}")
+        return None
+    
+    # Check if path exists
+    if not os.path.exists(gen_data_path):
+        print(f"Warning: Generalization test dataset not found at {gen_data_path}")
+        return None
+    
+    print(f'\n{"="*80}')
+    print(f'GENERALIZATION TEST: Testing on {gen_dataset_version}/{gen_dataset_split}')
+    print(f'{"="*80}')
+    
+    # Load generalization test dataset
+    num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
+    track_puzzle_ids = task_type == 'puzzle_classification'
+    
+    try:
+        gen_dataset = ARCDataset(
+            gen_data_path,
+            min_size=config.MIN_GRID_SIZE,
+            filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
+            max_grids=gen_max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+    except Exception as e:
+        print(f"Error loading generalization test dataset: {e}")
+        return None
+    
+    # Create dataloader
+    from functools import partial
+    if task_type == 'puzzle_classification':
+        collate_fn_for_task = collate_fn_puzzle_classification
+    else:
+        collate_fn_for_task = partial(collate_fn, num_distractors=num_distractors, use_input_output_pairs=use_input_output_pairs)
+    
+    gen_loader = DataLoader(
+        gen_dataset,
+        batch_size=config.BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collate_fn_for_task,
+        num_workers=0
+    )
+    
+    # Run validation on generalization dataset
+    criterion = nn.CrossEntropyLoss()
+    gen_loss, gen_acc = validate(model, gen_loader, criterion, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+    
+    # Prepare results
+    results = {
+        'dataset_version': gen_dataset_version,
+        'dataset_split': gen_dataset_split,
+        'num_grids': len(gen_dataset),
+        'loss': float(gen_loss),
+        'accuracy': float(gen_acc),
+        'timestamp': time.time()
+    }
+    
+    print(f'Generalization Test Loss: {gen_loss:.4f}, Accuracy: {gen_acc:.2f}%')
+    print(f'{"="*80}\n')
+    
+    return results
 
 
 def validate(model, dataloader, criterion, device, task_type='reconstruction', use_input_output_pairs=False):
@@ -1163,12 +1248,23 @@ def main():
     best_val_loss = float('inf')
     temperature = config.TEMPERATURE if config.BOTTLENECK_TYPE == 'communication' else 1.0
     
+    # Initialize generalization test history
+    generalization_history = []
+    generalization_results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
+    
     print('Starting training...')
     if config.BOTTLENECK_TYPE == 'communication':
         print('Communication bottleneck: grids → discrete symbols → reconstruction')
     else:
         print('Autoencoder bottleneck: grids → continuous latent → reconstruction')
     print('Decoder/Receiver knows the target size!')
+    
+    # Display generalization test configuration
+    if getattr(config, 'GENERALIZATION_TEST_ENABLED', False):
+        gen_dataset_version = getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2')
+        gen_interval = getattr(config, 'GENERALIZATION_TEST_INTERVAL', 20)
+        print(f'\n📊 Generalization Testing Enabled:')
+        print(f'   Testing on {gen_dataset_version} dataset every {gen_interval} epochs')
     
     # Show initial reconstructions/selections (before training)
     if task_type == 'selection':
@@ -1192,6 +1288,32 @@ def main():
             
             # Validate
             val_loss, val_acc = validate(model, val_loader, criterion, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+            
+            # Run generalization test every N epochs
+            gen_interval = getattr(config, 'GENERALIZATION_TEST_INTERVAL', 20)
+            if getattr(config, 'GENERALIZATION_TEST_ENABLED', False) and (epoch + 1) % gen_interval == 0:
+                gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+                if gen_results is not None:
+                    # Add epoch info
+                    gen_results['epoch'] = epoch + 1
+                    gen_results['train_loss'] = train_loss
+                    gen_results['train_acc'] = train_acc
+                    gen_results['val_loss'] = val_loss
+                    gen_results['val_acc'] = val_acc
+                    
+                    # Add to history
+                    generalization_history.append(gen_results)
+                    
+                    # Save results to JSON
+                    with open(generalization_results_path, 'w') as f:
+                        json.dump({
+                            'training_dataset': config.DATASET_VERSION,
+                            'training_split': config.DATASET_SPLIT,
+                            'task_type': task_type,
+                            'bottleneck_type': config.BOTTLENECK_TYPE,
+                            'history': generalization_history
+                        }, f, indent=2)
+                    print(f'✓ Saved generalization test results to {generalization_results_path}')
             
             # Update learning rate
             scheduler.step(val_loss)

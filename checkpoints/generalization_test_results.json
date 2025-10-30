@@ -1,0 +1,30 @@
+{
+  "training_dataset": "V1",
+  "training_split": "training",
+  "task_type": "reconstruction",
+  "bottleneck_type": "autoencoder",
+  "history": [
+    {
+      "dataset_version": "V2",
+      "dataset_split": "training",
+      "num_grids": 100,
+      "loss": 2.3375808596611023,
+      "accuracy": 4.055434921445906,
+      "timestamp": 1761856117.672004,
+      "epoch": 20,
+      "train_loss": 0.2113858014345169,
+      "train_acc": 100.0
+    },
+    {
+      "dataset_version": "V2",
+      "dataset_split": "training",
+      "num_grids": 100,
+      "loss": 2.2933000326156616,
+      "accuracy": 3.1549367735342955,
+      "timestamp": 1761856119.987208,
+      "epoch": 40,
+      "train_loss": 0.014799825847148895,
+      "train_acc": 100.0
+    }
+  ]
+}

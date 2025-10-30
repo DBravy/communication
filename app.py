@@ -139,6 +139,12 @@ training_state = {
     # STEP 2: Main training configuration (affects main training process)
     'use_pretrained': getattr(config, 'USE_PRETRAINED', True),  # Whether to LOAD pretrained encoder for main training
     'freeze_encoder': getattr(config, 'FREEZE_ENCODER', False),  # Whether to FREEZE encoder during main training
+    # Generalization test configuration
+    'generalization_test_enabled': getattr(config, 'GENERALIZATION_TEST_ENABLED', False),
+    'generalization_test_dataset_version': getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2'),
+    'generalization_test_dataset_split': getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training'),
+    'generalization_test_max_grids': getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100),
+    'generalization_test_interval': getattr(config, 'GENERALIZATION_TEST_INTERVAL', 1),
     # Training state
     'epoch': 0,
     'batch': 0,
@@ -1459,6 +1465,64 @@ def train_worker():
                         'batch': 'end'  # Indicate this is end-of-epoch visualization
                     })
                     break  # Only use first validation batch
+            
+            # Run generalization test every N epochs
+            gen_test_enabled = training_state.get('generalization_test_enabled', False)
+            gen_test_interval = training_state.get('generalization_test_interval', 1)
+            if gen_test_enabled and (epoch + 1) % gen_test_interval == 0:
+                from train import run_generalization_test
+                
+                # Temporarily set config values for run_generalization_test
+                old_gen_enabled = getattr(config, 'GENERALIZATION_TEST_ENABLED', False)
+                old_gen_version = getattr(config, 'GENERALIZATION_TEST_DATASET_VERSION', 'V2')
+                old_gen_split = getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training')
+                old_gen_max_grids = getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100)
+                
+                config.GENERALIZATION_TEST_ENABLED = training_state.get('generalization_test_enabled', False)
+                config.GENERALIZATION_TEST_DATASET_VERSION = training_state.get('generalization_test_dataset_version', 'V2')
+                config.GENERALIZATION_TEST_DATASET_SPLIT = training_state.get('generalization_test_dataset_split', 'training')
+                config.GENERALIZATION_TEST_MAX_GRIDS = training_state.get('generalization_test_max_grids', 100)
+                
+                try:
+                    gen_results = run_generalization_test(model, device, task_type=task_type, use_input_output_pairs=use_input_output_pairs)
+                    if gen_results is not None:
+                        # Add epoch info
+                        gen_results['epoch'] = epoch + 1
+                        gen_results['train_loss'] = avg_loss
+                        gen_results['train_acc'] = accuracy
+                        
+                        # Load existing results or create new
+                        generalization_results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
+                        if os.path.exists(generalization_results_path):
+                            with open(generalization_results_path, 'r') as f:
+                                all_results = json.load(f)
+                            if 'history' not in all_results:
+                                all_results['history'] = []
+                        else:
+                            all_results = {
+                                'training_dataset': training_state['dataset_version'],
+                                'training_split': training_state['dataset_split'],
+                                'task_type': task_type,
+                                'bottleneck_type': training_state['bottleneck_type'],
+                                'history': []
+                            }
+                        
+                        # Append new results
+                        all_results['history'].append(gen_results)
+                        
+                        # Save updated results
+                        with open(generalization_results_path, 'w') as f:
+                            json.dump(all_results, f, indent=2)
+                        
+                        print(f'✓ Generalization test: Loss={gen_results["loss"]:.4f}, Acc={gen_results["accuracy"]:.2f}%')
+                except Exception as e:
+                    print(f'Warning: Generalization test failed: {e}')
+                finally:
+                    # Restore old config values
+                    config.GENERALIZATION_TEST_ENABLED = old_gen_enabled
+                    config.GENERALIZATION_TEST_DATASET_VERSION = old_gen_version
+                    config.GENERALIZATION_TEST_DATASET_SPLIT = old_gen_split
+                    config.GENERALIZATION_TEST_MAX_GRIDS = old_gen_max_grids
                         
         training_state['running'] = False
         training_state['mode'] = None
@@ -2206,6 +2270,15 @@ def start_pretrain():
     with history_lock:
         metrics_history = []
     
+    # Clear generalization test results for new training run
+    generalization_results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
+    if os.path.exists(generalization_results_path):
+        try:
+            os.remove(generalization_results_path)
+            print('Cleared previous generalization test results')
+        except Exception as e:
+            print(f'Warning: Could not clear generalization test results: {e}')
+    
     training_thread = threading.Thread(target=pretrain_worker)
     training_thread.start()
     
@@ -2246,6 +2319,15 @@ def start_train():
     global metrics_history
     with history_lock:
         metrics_history = []
+    
+    # Clear generalization test results for new training run
+    generalization_results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
+    if os.path.exists(generalization_results_path):
+        try:
+            os.remove(generalization_results_path)
+            print('Cleared previous generalization test results')
+        except Exception as e:
+            print(f'Warning: Could not clear generalization test results: {e}')
     
     training_thread = threading.Thread(target=train_worker)
     training_thread.start()
@@ -2330,7 +2412,13 @@ def get_task_config():
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
         'freeze_encoder': training_state['freeze_encoder'],
-        'load_pretrained_before_pretrain': training_state['load_pretrained_before_pretrain']
+        'load_pretrained_before_pretrain': training_state['load_pretrained_before_pretrain'],
+        # Generalization test configuration
+        'generalization_test_enabled': training_state.get('generalization_test_enabled', False),
+        'generalization_test_dataset_version': training_state.get('generalization_test_dataset_version', 'V2'),
+        'generalization_test_dataset_split': training_state.get('generalization_test_dataset_split', 'training'),
+        'generalization_test_max_grids': training_state.get('generalization_test_max_grids', 100),
+        'generalization_test_interval': training_state.get('generalization_test_interval', 1)
     })
 
 
@@ -2426,6 +2514,18 @@ def set_task_config():
     if 'load_pretrained_before_pretrain' in data:
         training_state['load_pretrained_before_pretrain'] = data['load_pretrained_before_pretrain']
     
+    # Generalization test configuration
+    if 'generalization_test_enabled' in data:
+        training_state['generalization_test_enabled'] = bool(data['generalization_test_enabled'])
+    if 'generalization_test_dataset_version' in data:
+        training_state['generalization_test_dataset_version'] = data['generalization_test_dataset_version']
+    if 'generalization_test_dataset_split' in data:
+        training_state['generalization_test_dataset_split'] = data['generalization_test_dataset_split']
+    if 'generalization_test_max_grids' in data:
+        training_state['generalization_test_max_grids'] = int(data['generalization_test_max_grids']) if data['generalization_test_max_grids'] else 100
+    if 'generalization_test_interval' in data:
+        training_state['generalization_test_interval'] = int(data['generalization_test_interval']) if data['generalization_test_interval'] else 1
+    
     return jsonify({
         'status': 'success',
         'task_type': training_state['task_type'],
@@ -2458,7 +2558,12 @@ def set_task_config():
         'pretrain_task_type': training_state['pretrain_task_type'],
         'use_pretrained': training_state['use_pretrained'],
         'freeze_encoder': training_state['freeze_encoder'],
-        'load_pretrained_before_pretrain': training_state['load_pretrained_before_pretrain']
+        'load_pretrained_before_pretrain': training_state['load_pretrained_before_pretrain'],
+        'generalization_test_enabled': training_state.get('generalization_test_enabled', False),
+        'generalization_test_dataset_version': training_state.get('generalization_test_dataset_version', 'V2'),
+        'generalization_test_dataset_split': training_state.get('generalization_test_dataset_split', 'training'),
+        'generalization_test_max_grids': training_state.get('generalization_test_max_grids', 100),
+        'generalization_test_interval': training_state.get('generalization_test_interval', 1)
     })
 
 
@@ -2829,6 +2934,32 @@ def reset_batch_test():
         'message': 'Batch test state has been reset',
         'was_running': was_running
     })
+
+
+@app.route('/generalization_test_results', methods=['GET'])
+def get_generalization_test_results():
+    """Get generalization test results from JSON file."""
+    results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
+    
+    if not os.path.exists(results_path):
+        return jsonify({
+            'available': False,
+            'message': 'No generalization test results available yet'
+        })
+    
+    try:
+        with open(results_path, 'r') as f:
+            results_data = json.load(f)
+        
+        return jsonify({
+            'available': True,
+            'data': results_data
+        })
+    except Exception as e:
+        return jsonify({
+            'available': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/solve_puzzle', methods=['POST'])
