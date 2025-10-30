@@ -4,6 +4,7 @@
 DATA_PATH = 'arc-agi_test_challenges.json'  # Legacy single-file format (deprecated)
 DATASET_VERSION = 'V1'  # 'V1' or 'V2' - which dataset version to use
 DATASET_SPLIT = 'training'  # 'training' or 'evaluation' - which split to use
+USE_COMBINED_SPLITS = False  # If True, combine both training and evaluation splits for training
 NUM_COLORS = 10
 MIN_GRID_SIZE = 3
 FILTER_GRID_SIZE = None  # Set to (height, width) to only train on specific grid size, or None for all grids

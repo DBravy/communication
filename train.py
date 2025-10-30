@@ -16,6 +16,112 @@ from live_plotter import LivePlotter
 from puzzle_training_dataset import ARCPuzzleTrainingDataset, collate_fn_puzzle_training
 
 
+def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs):
+    """Load dataset(s) based on split configuration.
+    
+    Args:
+        dataset_version: 'V1' or 'V2'
+        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True)
+        use_combined_splits: If True, load and combine both training and evaluation splits
+        min_size: Minimum grid size
+        filter_size: Filter for specific grid size
+        max_grids: Maximum number of grids per split (None = all)
+        num_distractors: Number of distractor grids
+        track_puzzle_ids: Whether to track puzzle IDs
+        use_input_output_pairs: Whether to use input-output pairs
+    
+    Returns:
+        Combined dataset
+    """
+    if not use_combined_splits:
+        # Load single split as before
+        if dataset_version in ['V1', 'V2']:
+            data_path = os.path.join(dataset_version, 'data', dataset_split)
+        else:
+            data_path = config.DATA_PATH
+        
+        return ARCDataset(
+            data_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+    else:
+        # Load both training and evaluation splits and combine them
+        print(f'Loading combined splits: training + evaluation from {dataset_version}')
+        
+        if dataset_version in ['V1', 'V2']:
+            train_path = os.path.join(dataset_version, 'data', 'training')
+            eval_path = os.path.join(dataset_version, 'data', 'evaluation')
+        else:
+            # Fallback to single path if not V1/V2
+            print("Warning: USE_COMBINED_SPLITS not supported for legacy DATA_PATH format")
+            return ARCDataset(
+                config.DATA_PATH,
+                min_size=min_size,
+                filter_size=filter_size,
+                max_grids=max_grids,
+                num_distractors=num_distractors,
+                track_puzzle_ids=track_puzzle_ids,
+                use_input_output_pairs=use_input_output_pairs
+            )
+        
+        # Load training split
+        train_dataset = ARCDataset(
+            train_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+        
+        # Load evaluation split
+        eval_dataset = ARCDataset(
+            eval_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+        
+        # Combine datasets using ConcatDataset
+        from torch.utils.data import ConcatDataset
+        combined_dataset = ConcatDataset([train_dataset, eval_dataset])
+        
+        # If tracking puzzle IDs, we need to merge the puzzle_id_map
+        if track_puzzle_ids and hasattr(train_dataset, 'puzzle_id_map') and hasattr(eval_dataset, 'puzzle_id_map'):
+            # Create a combined puzzle_id_map
+            combined_puzzle_id_map = {}
+            next_id = 0
+            
+            # Add training puzzles
+            for puzzle_id, _ in train_dataset.puzzle_id_map.items():
+                combined_puzzle_id_map[puzzle_id] = next_id
+                next_id += 1
+            
+            # Add evaluation puzzles (that aren't already in training)
+            for puzzle_id, _ in eval_dataset.puzzle_id_map.items():
+                if puzzle_id not in combined_puzzle_id_map:
+                    combined_puzzle_id_map[puzzle_id] = next_id
+                    next_id += 1
+            
+            # Attach the combined map to the dataset
+            combined_dataset.puzzle_id_map = combined_puzzle_id_map
+            print(f'Combined {len(train_dataset)} training grids + {len(eval_dataset)} evaluation grids')
+            print(f'Total unique puzzles: {len(combined_puzzle_id_map)}')
+        else:
+            print(f'Combined {len(train_dataset)} training grids + {len(eval_dataset)} evaluation grids')
+        
+        return combined_dataset
+
+
 def visualize_grid(grid, title="Grid"):
     """Print a grid with colored blocks."""
     color_codes = {
@@ -1110,8 +1216,14 @@ def main():
     
     # Load dataset
     print('Loading dataset...')
-    dataset = ARCDataset(
-        config.DATA_PATH, 
+    use_combined_splits = getattr(config, 'USE_COMBINED_SPLITS', False)
+    dataset_version = getattr(config, 'DATASET_VERSION', 'V2')
+    dataset_split = getattr(config, 'DATASET_SPLIT', 'training')
+    
+    dataset = load_dataset_with_splits(
+        dataset_version=dataset_version,
+        dataset_split=dataset_split,
+        use_combined_splits=use_combined_splits,
         min_size=config.MIN_GRID_SIZE,
         filter_size=getattr(config, 'FILTER_GRID_SIZE', None),
         max_grids=getattr(config, 'MAX_GRIDS', None),

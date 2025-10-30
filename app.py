@@ -28,6 +28,108 @@ def get_data_path(dataset_version='V2', dataset_split='training'):
         # Legacy single-file format
         return config.DATA_PATH
 
+
+def load_dataset_with_splits(dataset_version, dataset_split, use_combined_splits, min_size, filter_size, max_grids, num_distractors, track_puzzle_ids, use_input_output_pairs=False):
+    """Load dataset(s) based on split configuration.
+    
+    Args:
+        dataset_version: 'V1' or 'V2'
+        dataset_split: 'training' or 'evaluation' (ignored if use_combined_splits=True)
+        use_combined_splits: If True, load and combine both training and evaluation splits
+        min_size: Minimum grid size
+        filter_size: Filter for specific grid size
+        max_grids: Maximum number of grids per split (None = all)
+        num_distractors: Number of distractor grids
+        track_puzzle_ids: Whether to track puzzle IDs
+        use_input_output_pairs: Whether to use input-output pairs
+    
+    Returns:
+        Combined dataset
+    """
+    if not use_combined_splits:
+        # Load single split as before
+        data_path = get_data_path(dataset_version, dataset_split)
+        return ARCDataset(
+            data_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+    else:
+        # Load both training and evaluation splits and combine them
+        print(f'[Dataset] Loading combined splits: training + evaluation from {dataset_version}')
+        
+        if dataset_version in ['V1', 'V2']:
+            train_path = os.path.join(dataset_version, 'data', 'training')
+            eval_path = os.path.join(dataset_version, 'data', 'evaluation')
+        else:
+            # Fallback to single path if not V1/V2
+            print("[Dataset] Warning: USE_COMBINED_SPLITS not supported for legacy DATA_PATH format")
+            return ARCDataset(
+                config.DATA_PATH,
+                min_size=min_size,
+                filter_size=filter_size,
+                max_grids=max_grids,
+                num_distractors=num_distractors,
+                track_puzzle_ids=track_puzzle_ids,
+                use_input_output_pairs=use_input_output_pairs
+            )
+        
+        # Load training split
+        train_dataset = ARCDataset(
+            train_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+        
+        # Load evaluation split
+        eval_dataset = ARCDataset(
+            eval_path,
+            min_size=min_size,
+            filter_size=filter_size,
+            max_grids=max_grids,
+            num_distractors=num_distractors,
+            track_puzzle_ids=track_puzzle_ids,
+            use_input_output_pairs=use_input_output_pairs
+        )
+        
+        # Combine datasets using ConcatDataset
+        from torch.utils.data import ConcatDataset
+        combined_dataset = ConcatDataset([train_dataset, eval_dataset])
+        
+        # If tracking puzzle IDs, we need to merge the puzzle_id_map
+        if track_puzzle_ids and hasattr(train_dataset, 'puzzle_id_map') and hasattr(eval_dataset, 'puzzle_id_map'):
+            # Create a combined puzzle_id_map
+            combined_puzzle_id_map = {}
+            next_id = 0
+            
+            # Add training puzzles
+            for puzzle_id, _ in train_dataset.puzzle_id_map.items():
+                combined_puzzle_id_map[puzzle_id] = next_id
+                next_id += 1
+            
+            # Add evaluation puzzles (that aren't already in training)
+            for puzzle_id, _ in eval_dataset.puzzle_id_map.items():
+                if puzzle_id not in combined_puzzle_id_map:
+                    combined_puzzle_id_map[puzzle_id] = next_id
+                    next_id += 1
+            
+            # Attach the combined map to the dataset
+            combined_dataset.puzzle_id_map = combined_puzzle_id_map
+            print(f'[Dataset] Combined {len(train_dataset)} training grids + {len(eval_dataset)} evaluation grids')
+            print(f'[Dataset] Total unique puzzles: {len(combined_puzzle_id_map)}')
+        else:
+            print(f'[Dataset] Combined {len(train_dataset)} training grids + {len(eval_dataset)} evaluation grids')
+        
+        return combined_dataset
+
 # Utility function for saving checkpoints with full config
 def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, training_state, val_loss=None, val_acc=None):
     """Save a complete checkpoint with model, optimizer, and all configuration."""
@@ -109,6 +211,7 @@ training_state = {
     # Data configuration
     'dataset_version': getattr(config, 'DATASET_VERSION', 'V2'),  # 'V1' or 'V2'
     'dataset_split': getattr(config, 'DATASET_SPLIT', 'training'),  # 'training' or 'evaluation'
+    'use_combined_splits': getattr(config, 'USE_COMBINED_SPLITS', False),  # If True, use both training and evaluation
     'max_grids': getattr(config, 'MAX_GRIDS', None),
     'filter_grid_size': getattr(config, 'FILTER_GRID_SIZE', None),
     # Puzzle solving configuration
@@ -615,19 +718,15 @@ def pretrain_worker():
             num_distractors_for_dataset = 0
             track_puzzle_ids = False
         
-        # Get dataset path based on version and split
-        data_path = get_data_path(
+        # Load ARC dataset (with optional combined splits)
+        arc_dataset = load_dataset_with_splits(
             dataset_version=training_state['dataset_version'],
-            dataset_split=training_state['dataset_split']
-        )
-        
-        # Load ARC dataset
-        arc_dataset = ARCDataset(
-            data_path, 
+            dataset_split=training_state['dataset_split'],
+            use_combined_splits=training_state.get('use_combined_splits', False),
             min_size=config.MIN_GRID_SIZE,
-            filter_size=training_state['filter_grid_size'],  # ✅ Read from training_state
-            max_grids=training_state['max_grids'],           # ✅ Read from training_state
-            num_distractors=num_distractors_for_dataset,     # (or num_distractors in train_worker)
+            filter_size=training_state['filter_grid_size'],
+            max_grids=training_state['max_grids'],
+            num_distractors=num_distractors_for_dataset,
             track_puzzle_ids=track_puzzle_ids
         )
         
@@ -1074,14 +1173,11 @@ def train_worker():
         track_puzzle_ids = task_type == 'puzzle_classification'
         use_input_output_pairs = training_state.get('use_input_output_pairs', False)
         
-        # Get dataset path based on version and split
-        data_path = get_data_path(
+        # Load dataset (with optional combined splits)
+        dataset = load_dataset_with_splits(
             dataset_version=training_state['dataset_version'],
-            dataset_split=training_state['dataset_split']
-        )
-        
-        dataset = ARCDataset(
-            data_path, 
+            dataset_split=training_state['dataset_split'],
+            use_combined_splits=training_state.get('use_combined_splits', False),
             min_size=config.MIN_GRID_SIZE,
             filter_size=training_state['filter_grid_size'],
             max_grids=training_state['max_grids'],
@@ -2384,6 +2480,7 @@ def get_task_config():
         # Data configuration
         'dataset_version': training_state['dataset_version'],
         'dataset_split': training_state['dataset_split'],
+        'use_combined_splits': training_state.get('use_combined_splits', False),
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         # Puzzle solving configuration
@@ -2447,6 +2544,8 @@ def set_task_config():
         training_state['dataset_version'] = data['dataset_version']
     if 'dataset_split' in data:
         training_state['dataset_split'] = data['dataset_split']
+    if 'use_combined_splits' in data:
+        training_state['use_combined_splits'] = bool(data['use_combined_splits'])
     if 'max_grids' in data:
         training_state['max_grids'] = int(data['max_grids']) if data['max_grids'] else None
     if 'filter_grid_size' in data:
@@ -2535,6 +2634,7 @@ def set_task_config():
         'receiver_gets_input_puzzle': training_state['receiver_gets_input_puzzle'],
         'dataset_version': training_state['dataset_version'],
         'dataset_split': training_state['dataset_split'],
+        'use_combined_splits': training_state.get('use_combined_splits', False),
         'max_grids': training_state['max_grids'],
         'filter_grid_size': training_state['filter_grid_size'],
         'rule_dim': training_state['rule_dim'],

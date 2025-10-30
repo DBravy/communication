@@ -611,6 +611,12 @@
                             <option value="evaluation">Evaluation</option>
                         </select>
                     </div>
+                    <div class="config-group">
+                        <label>
+                            <input type="checkbox" id="useCombinedSplits" onchange="markConfigDirty()">
+                            Use Combined Splits (Train + Eval)
+                        </label>
+                    </div>
                 </div>
                 <div class="config-row">
                     <div class="config-group">
@@ -889,6 +895,7 @@
                 // Data configuration
                 document.getElementById('datasetVersion').value = data.dataset_version || 'V2';
                 document.getElementById('datasetSplit').value = data.dataset_split || 'training';
+                document.getElementById('useCombinedSplits').checked = data.use_combined_splits || false;
                 document.getElementById('maxGrids').value = data.max_grids || 0;
                 if (data.filter_grid_size && data.filter_grid_size.length === 2) {
                     document.getElementById('filterGridHeight').value = data.filter_grid_size[0];
@@ -1023,6 +1030,7 @@
             // Data configuration
             const datasetVersion = document.getElementById('datasetVersion').value;
             const datasetSplit = document.getElementById('datasetSplit').value;
+            const useCombinedSplits = document.getElementById('useCombinedSplits').checked;
             const maxGrids = document.getElementById('maxGrids').value;
             const filterGridHeight = document.getElementById('filterGridHeight').value;
             const filterGridWidth = document.getElementById('filterGridWidth').value;
@@ -1081,6 +1089,7 @@
                     use_input_output_pairs: useInputOutputPairs,
                     dataset_version: datasetVersion,
                     dataset_split: datasetSplit,
+                    use_combined_splits: useCombinedSplits,
                     max_grids: maxGrids ? parseInt(maxGrids) : null,
                     filter_grid_size: filterGridSize,
                     hidden_dim: parseInt(hiddenDim),
