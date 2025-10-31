@@ -5,118 +5,42 @@
   "bottleneck_type": "communication",
   "history": [
     {
-      "num_similar_pairs": 10,
-      "num_dissimilar_pairs": 5,
+      "num_similar_pairs": 50,
+      "num_dissimilar_pairs": 50,
       "cosine_similarity": {
-        "similar_mean": 0.7578935563564301,
-        "similar_std": 0.05160614200823634,
-        "dissimilar_mean": 0.7498798489570617,
-        "dissimilar_std": 0.10804386957207049,
-        "difference": 0.008013707399368353,
-        "geometric_mean": 0.7335207959016165,
-        "geometric_std": 0.04207075301035223,
-        "color_mean": 0.7944526970386505,
-        "color_std": 0.04213602257504344
+        "similar_mean": 0.823933271765709,
+        "similar_std": 0.21560985306430341,
+        "dissimilar_mean": 0.8313625955581665,
+        "dissimilar_std": 0.20729669819380375,
+        "difference": -0.007429323792457532,
+        "geometric_mean": 0.8531675022659879,
+        "geometric_std": 0.22220883738220246,
+        "color_mean": 0.7671844713828143,
+        "color_std": 0.1897361537713976
       },
       "euclidean_distance": {
-        "similar_mean": 6.417258763313294,
-        "similar_std": 1.8382953977080878,
-        "dissimilar_mean": 5.733037090301513,
-        "dissimilar_std": 1.5848430297363192,
-        "difference": -0.6842216730117805
+        "similar_mean": 34.26741450786591,
+        "similar_std": 23.343423701603246,
+        "dissimilar_mean": 38.25846983909607,
+        "dissimilar_std": 23.826293785926612,
+        "difference": 3.9910553312301644
       },
       "per_transform_cosine": {
-        "rot90": 0.6823962926864624,
-        "rot180": 0.7299800117810568,
-        "rot270": 0.0,
-        "fliph": 0.764394223690033,
-        "flipv": 0.0,
-        "color_swap": 0.0,
-        "color_shift": 0.8130332827568054,
-        "color_invert": 0.7874860167503357,
-        "color_remap": 0.7898054718971252
+        "rot90": 0.8472680907983047,
+        "rot180": 0.9950219690799713,
+        "rot270": 0.8907909691333771,
+        "fliph": 0.4556068778038025,
+        "flipv": 0.8250392794609069,
+        "color_swap": 0.8756109674771627,
+        "color_shift": 0.8459481120109558,
+        "color_invert": 0.5891929268836975,
+        "color_remap": 0.5950859487056732
       },
       "test_passed": false,
-      "timestamp": 1761929938.390037,
+      "timestamp": 1761930513.176857,
       "epoch": 20,
-      "train_loss": 1.4588568210601807,
-      "train_acc": 34.72222222222222
-    },
-    {
-      "num_similar_pairs": 10,
-      "num_dissimilar_pairs": 5,
-      "cosine_similarity": {
-        "similar_mean": 0.8156334578990936,
-        "similar_std": 0.08782690065106674,
-        "dissimilar_mean": 0.7289274573326111,
-        "dissimilar_std": 0.15126477425375273,
-        "difference": 0.08670600056648248,
-        "geometric_mean": 0.8430533210436503,
-        "geometric_std": 0.09031637268091261,
-        "color_mean": 0.7745036631822586,
-        "color_std": 0.06503004749980047
-      },
-      "euclidean_distance": {
-        "similar_mean": 55.73074722290039,
-        "similar_std": 14.657145293801742,
-        "dissimilar_mean": 51.21204671859741,
-        "dissimilar_std": 25.571629936658898,
-        "difference": -4.518700504302977
-      },
-      "per_transform_cosine": {
-        "rot90": 0.7675781846046448,
-        "rot180": 0.7781574726104736,
-        "rot270": 0.0,
-        "fliph": 0.9107897877693176,
-        "flipv": 0.9118185043334961,
-        "color_swap": 0.0,
-        "color_shift": 0.7834807634353638,
-        "color_invert": 0.6796342134475708,
-        "color_remap": 0.8174498379230499
-      },
-      "test_passed": false,
-      "timestamp": 1761929941.673951,
-      "epoch": 40,
-      "train_loss": 1.4475399255752563,
-      "train_acc": 31.944444444444443
-    },
-    {
-      "num_similar_pairs": 10,
-      "num_dissimilar_pairs": 5,
-      "cosine_similarity": {
-        "similar_mean": 0.8474987149238586,
-        "similar_std": 0.08150248024406784,
-        "dissimilar_mean": 0.773823368549347,
-        "dissimilar_std": 0.13396768196160933,
-        "difference": 0.07367534637451167,
-        "geometric_mean": 0.8256136079629263,
-        "geometric_std": 0.084215360485662,
-        "color_mean": 0.8803263753652573,
-        "color_std": 0.06459259363230992
-      },
-      "euclidean_distance": {
-        "similar_mean": 99.91936988830567,
-        "similar_std": 33.21203585867552,
-        "dissimilar_mean": 85.95020408630371,
-        "dissimilar_std": 39.6041336151589,
-        "difference": -13.969165802001953
-      },
-      "per_transform_cosine": {
-        "rot90": 0.9037692546844482,
-        "rot180": 0.0,
-        "rot270": 0.8499255776405334,
-        "fliph": 0.7115693092346191,
-        "flipv": 0.8192459642887115,
-        "color_swap": 0.9292215406894684,
-        "color_shift": 0.0,
-        "color_invert": 0.8314312100410461,
-        "color_remap": 0.0
-      },
-      "test_passed": false,
-      "timestamp": 1761929944.7501261,
-      "epoch": 60,
-      "train_loss": 1.4249027967453003,
-      "train_acc": 33.333333333333336
+      "train_loss": 1.5657139817873638,
+      "train_acc": 42.33790587549343
     }
   ]
 }

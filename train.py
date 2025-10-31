@@ -775,6 +775,11 @@ def run_generalization_test(model, device, task_type='reconstruction', use_input
     
     print(f'\n{"="*80}')
     
+    # Determine num_distractors and track_puzzle_ids based on task type
+    # (needed for both holdout dataset and regular generalization test)
+    num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
+    track_puzzle_ids = task_type == 'puzzle_classification'
+    
     # If holdout_dataset is provided (USE_ALL_DATASETS mode), use it directly
     if holdout_dataset is not None:
         print(f'GENERALIZATION TEST: Testing on HOLDOUT grids')
@@ -805,9 +810,6 @@ def run_generalization_test(model, device, task_type='reconstruction', use_input
         print(f'{"="*80}')
         
         # Load generalization test dataset
-        num_distractors = getattr(config, 'NUM_DISTRACTORS', 0) if task_type == 'selection' else 0
-        track_puzzle_ids = task_type == 'puzzle_classification'
-        
         try:
             gen_dataset = ARCDataset(
                 gen_data_path,
