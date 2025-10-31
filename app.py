@@ -18,6 +18,24 @@ from model import ARCEncoder, ARCAutoencoder
 
 app = Flask(__name__)
 
+# Utility function to convert numpy types to native Python types for JSON serialization
+def convert_to_json_serializable(obj):
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {key: convert_to_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_json_serializable(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
+
 # Utility function for getting data path based on dataset version and split
 def get_data_path(dataset_version='V2', dataset_split='training'):
     """Get the path to the dataset based on version and split."""
@@ -275,6 +293,10 @@ training_state = {
     'generalization_test_dataset_split': getattr(config, 'GENERALIZATION_TEST_DATASET_SPLIT', 'training'),
     'generalization_test_max_grids': getattr(config, 'GENERALIZATION_TEST_MAX_GRIDS', 100),
     'generalization_test_interval': getattr(config, 'GENERALIZATION_TEST_INTERVAL', 1),
+    # Similarity test configuration
+    'similarity_test_enabled': getattr(config, 'SIMILARITY_TEST_ENABLED', False),
+    'similarity_test_interval': getattr(config, 'SIMILARITY_TEST_INTERVAL', 1),
+    'similarity_test_num_pairs': getattr(config, 'SIMILARITY_TEST_NUM_PAIRS', 50),
     # Training state
     'epoch': 0,
     'batch': 0,
@@ -1638,10 +1660,20 @@ def train_worker():
                         # Load existing results or create new
                         generalization_results_path = os.path.join(config.SAVE_DIR, 'generalization_test_results.json')
                         if os.path.exists(generalization_results_path):
-                            with open(generalization_results_path, 'r') as f:
-                                all_results = json.load(f)
-                            if 'history' not in all_results:
-                                all_results['history'] = []
+                            try:
+                                with open(generalization_results_path, 'r') as f:
+                                    all_results = json.load(f)
+                                if 'history' not in all_results:
+                                    all_results['history'] = []
+                            except (json.JSONDecodeError, KeyError) as e:
+                                print(f'⚠️  Corrupted generalization results file, starting fresh: {e}')
+                                all_results = {
+                                    'training_dataset': training_state['dataset_version'],
+                                    'training_split': training_state['dataset_split'],
+                                    'task_type': task_type,
+                                    'bottleneck_type': training_state['bottleneck_type'],
+                                    'history': []
+                                }
                         else:
                             all_results = {
                                 'training_dataset': training_state['dataset_version'],
@@ -1651,8 +1683,9 @@ def train_worker():
                                 'history': []
                             }
                         
-                        # Append new results
-                        all_results['history'].append(gen_results)
+                        # Append new results (convert numpy types to JSON-serializable types)
+                        gen_results_json = convert_to_json_serializable(gen_results)
+                        all_results['history'].append(gen_results_json)
                         
                         # Save updated results
                         with open(generalization_results_path, 'w') as f:
@@ -1667,6 +1700,82 @@ def train_worker():
                     config.GENERALIZATION_TEST_DATASET_VERSION = old_gen_version
                     config.GENERALIZATION_TEST_DATASET_SPLIT = old_gen_split
                     config.GENERALIZATION_TEST_MAX_GRIDS = old_gen_max_grids
+            
+            # Run similarity test every N epochs
+            sim_test_enabled = training_state.get('similarity_test_enabled', False)
+            sim_test_interval = training_state.get('similarity_test_interval', 1)
+            if sim_test_enabled and (epoch + 1) % sim_test_interval == 0:
+                from train import run_similarity_test
+                
+                # Temporarily set config values for run_similarity_test
+                old_sim_enabled = getattr(config, 'SIMILARITY_TEST_ENABLED', False)
+                old_sim_num_pairs = getattr(config, 'SIMILARITY_TEST_NUM_PAIRS', 50)
+                
+                config.SIMILARITY_TEST_ENABLED = training_state.get('similarity_test_enabled', False)
+                config.SIMILARITY_TEST_NUM_PAIRS = training_state.get('similarity_test_num_pairs', 50)
+                
+                try:
+                    # Run similarity test using the training dataset
+                    sim_results = run_similarity_test(
+                        model, 
+                        device, 
+                        dataset=dataset,
+                        num_similar_pairs=training_state.get('similarity_test_num_pairs', 50),
+                        num_dissimilar_pairs=training_state.get('similarity_test_num_pairs', 50)
+                    )
+                    
+                    if sim_results is not None:
+                        # Add epoch info
+                        sim_results['epoch'] = epoch + 1
+                        sim_results['train_loss'] = avg_loss
+                        sim_results['train_acc'] = accuracy
+                        
+                        # Load existing results or create new
+                        similarity_results_path = os.path.join(config.SAVE_DIR, 'similarity_test_results.json')
+                        if os.path.exists(similarity_results_path):
+                            try:
+                                with open(similarity_results_path, 'r') as f:
+                                    all_results = json.load(f)
+                                if 'history' not in all_results:
+                                    all_results['history'] = []
+                            except (json.JSONDecodeError, KeyError) as e:
+                                print(f'⚠️  Corrupted similarity results file, starting fresh: {e}')
+                                all_results = {
+                                    'training_dataset': training_state['dataset_version'],
+                                    'training_split': training_state['dataset_split'],
+                                    'task_type': task_type,
+                                    'bottleneck_type': training_state['bottleneck_type'],
+                                    'history': []
+                                }
+                        else:
+                            all_results = {
+                                'training_dataset': training_state['dataset_version'],
+                                'training_split': training_state['dataset_split'],
+                                'task_type': task_type,
+                                'bottleneck_type': training_state['bottleneck_type'],
+                                'history': []
+                            }
+                        
+                        # Append new results (convert numpy types to JSON-serializable types)
+                        sim_results_json = convert_to_json_serializable(sim_results)
+                        all_results['history'].append(sim_results_json)
+                        
+                        # Save updated results
+                        with open(similarity_results_path, 'w') as f:
+                            json.dump(all_results, f, indent=2)
+                        
+                        # Print summary
+                        if sim_results.get('cosine_similarity'):
+                            cos_sim = sim_results['cosine_similarity']
+                            print(f'✓ Similarity test: Similar={cos_sim.get("similar_mean", 0):.3f}, Dissimilar={cos_sim.get("dissimilar_mean", 0):.3f}, Separation={cos_sim.get("separation", 0):.3f}')
+                except Exception as e:
+                    print(f'Warning: Similarity test failed: {e}')
+                    import traceback
+                    traceback.print_exc()
+                finally:
+                    # Restore old config values
+                    config.SIMILARITY_TEST_ENABLED = old_sim_enabled
+                    config.SIMILARITY_TEST_NUM_PAIRS = old_sim_num_pairs
                         
         training_state['running'] = False
         training_state['mode'] = None
@@ -2423,6 +2532,15 @@ def start_pretrain():
         except Exception as e:
             print(f'Warning: Could not clear generalization test results: {e}')
     
+    # Clear similarity test results for new training run
+    similarity_results_path = os.path.join(config.SAVE_DIR, 'similarity_test_results.json')
+    if os.path.exists(similarity_results_path):
+        try:
+            os.remove(similarity_results_path)
+            print('Cleared previous similarity test results')
+        except Exception as e:
+            print(f'Warning: Could not clear similarity test results: {e}')
+    
     training_thread = threading.Thread(target=pretrain_worker)
     training_thread.start()
     
@@ -2472,6 +2590,15 @@ def start_train():
             print('Cleared previous generalization test results')
         except Exception as e:
             print(f'Warning: Could not clear generalization test results: {e}')
+    
+    # Clear similarity test results for new training run
+    similarity_results_path = os.path.join(config.SAVE_DIR, 'similarity_test_results.json')
+    if os.path.exists(similarity_results_path):
+        try:
+            os.remove(similarity_results_path)
+            print('Cleared previous similarity test results')
+        except Exception as e:
+            print(f'Warning: Could not clear similarity test results: {e}')
     
     training_thread = threading.Thread(target=train_worker)
     training_thread.start()
@@ -2566,7 +2693,11 @@ def get_task_config():
         'generalization_test_dataset_version': training_state.get('generalization_test_dataset_version', 'V2'),
         'generalization_test_dataset_split': training_state.get('generalization_test_dataset_split', 'training'),
         'generalization_test_max_grids': training_state.get('generalization_test_max_grids', 100),
-        'generalization_test_interval': training_state.get('generalization_test_interval', 1)
+        'generalization_test_interval': training_state.get('generalization_test_interval', 1),
+        # Similarity test configuration
+        'similarity_test_enabled': training_state.get('similarity_test_enabled', False),
+        'similarity_test_interval': training_state.get('similarity_test_interval', 1),
+        'similarity_test_num_pairs': training_state.get('similarity_test_num_pairs', 50)
     })
 
 
@@ -2682,6 +2813,14 @@ def set_task_config():
     if 'generalization_test_interval' in data:
         training_state['generalization_test_interval'] = int(data['generalization_test_interval']) if data['generalization_test_interval'] else 1
     
+    # Similarity test configuration
+    if 'similarity_test_enabled' in data:
+        training_state['similarity_test_enabled'] = bool(data['similarity_test_enabled'])
+    if 'similarity_test_interval' in data:
+        training_state['similarity_test_interval'] = int(data['similarity_test_interval']) if data['similarity_test_interval'] else 1
+    if 'similarity_test_num_pairs' in data:
+        training_state['similarity_test_num_pairs'] = int(data['similarity_test_num_pairs']) if data['similarity_test_num_pairs'] else 50
+    
     return jsonify({
         'status': 'success',
         'task_type': training_state['task_type'],
@@ -2723,7 +2862,10 @@ def set_task_config():
         'generalization_test_dataset_version': training_state.get('generalization_test_dataset_version', 'V2'),
         'generalization_test_dataset_split': training_state.get('generalization_test_dataset_split', 'training'),
         'generalization_test_max_grids': training_state.get('generalization_test_max_grids', 100),
-        'generalization_test_interval': training_state.get('generalization_test_interval', 1)
+        'generalization_test_interval': training_state.get('generalization_test_interval', 1),
+        'similarity_test_enabled': training_state.get('similarity_test_enabled', False),
+        'similarity_test_interval': training_state.get('similarity_test_interval', 1),
+        'similarity_test_num_pairs': training_state.get('similarity_test_num_pairs', 50)
     })
 
 
@@ -3105,6 +3247,32 @@ def get_generalization_test_results():
         return jsonify({
             'available': False,
             'message': 'No generalization test results available yet'
+        })
+    
+    try:
+        with open(results_path, 'r') as f:
+            results_data = json.load(f)
+        
+        return jsonify({
+            'available': True,
+            'data': results_data
+        })
+    except Exception as e:
+        return jsonify({
+            'available': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/similarity_test_results', methods=['GET'])
+def get_similarity_test_results():
+    """Get similarity test results from JSON file."""
+    results_path = os.path.join(config.SAVE_DIR, 'similarity_test_results.json')
+    
+    if not os.path.exists(results_path):
+        return jsonify({
+            'available': False,
+            'message': 'No similarity test results available yet'
         })
     
     try:

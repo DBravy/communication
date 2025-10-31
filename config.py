@@ -74,6 +74,11 @@ GENERALIZATION_TEST_DATASET_SPLIT = 'training'  # Split to use for generalizatio
 GENERALIZATION_TEST_INTERVAL = 20  # Run generalization test every N epochs
 GENERALIZATION_TEST_MAX_GRIDS = 100  # Maximum number of grids to test (None = all grids)
 
+# Similarity Testing (test encoding consistency on similar/dissimilar pairs)
+SIMILARITY_TEST_ENABLED = True  # Whether to run similarity tests on encoding consistency
+SIMILARITY_TEST_INTERVAL = 20  # Run similarity test every N epochs
+SIMILARITY_TEST_NUM_PAIRS = 50  # Number of similar/dissimilar pairs to test
+
 # Memory Management (to prevent issues during long training sessions)
 MAX_PLOT_POINTS = 10000  # Maximum data points kept in memory for plotting (older data is downsampled)
 MAX_EPOCH_MARKERS = 50   # Maximum epoch markers displayed on plots (older ones are removed)

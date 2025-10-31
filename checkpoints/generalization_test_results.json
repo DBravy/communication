@@ -2,29 +2,40 @@
   "training_dataset": "V1",
   "training_split": "training",
   "task_type": "reconstruction",
-  "bottleneck_type": "autoencoder",
+  "bottleneck_type": "communication",
   "history": [
     {
       "dataset_version": "V2",
       "dataset_split": "training",
       "num_grids": 100,
-      "loss": 2.3375808596611023,
-      "accuracy": 4.055434921445906,
-      "timestamp": 1761856117.672004,
+      "loss": 2.378936469554901,
+      "accuracy": 23.489589985949674,
+      "timestamp": 1761929938.29393,
       "epoch": 20,
-      "train_loss": 0.2113858014345169,
-      "train_acc": 100.0
+      "train_loss": 1.4588568210601807,
+      "train_acc": 34.72222222222222
     },
     {
       "dataset_version": "V2",
       "dataset_split": "training",
       "num_grids": 100,
-      "loss": 2.2933000326156616,
-      "accuracy": 3.1549367735342955,
-      "timestamp": 1761856119.987208,
+      "loss": 2.4238712191581726,
+      "accuracy": 26.20385745305914,
+      "timestamp": 1761929941.5925498,
       "epoch": 40,
-      "train_loss": 0.014799825847148895,
-      "train_acc": 100.0
+      "train_loss": 1.4475399255752563,
+      "train_acc": 31.944444444444443
+    },
+    {
+      "dataset_version": "V2",
+      "dataset_split": "training",
+      "num_grids": 100,
+      "loss": 2.4399207830429077,
+      "accuracy": 28.950057478605185,
+      "timestamp": 1761929944.685535,
+      "epoch": 60,
+      "train_loss": 1.4249027967453003,
+      "train_acc": 33.333333333333336
     }
   ]
 }

@@ -807,6 +807,79 @@
                 </div>
             </div>
 
+            <!-- Testing Configuration -->
+            <div class="config-section">
+                <h4 class="config-section-title">🧪 Testing Configuration (During Training)</h4>
+                <div style="background: #e0f2fe; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-size: 13px; color: #075985;">
+                    ℹ️ Configure automatic tests that run periodically during training to evaluate model performance
+                </div>
+                
+                <!-- Generalization Test -->
+                <div style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #e5e7eb;">
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="generalizationTestEnabled" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="generalizationTestEnabled" onchange="markConfigDirty(); updateTestConfigVisibility();" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span style="font-weight: 600;">📊 Enable Generalization Test</span>
+                            </label>
+                            <span style="font-size: 12px; color: #6b7280; margin-left: 26px;">Test on unseen dataset during training</span>
+                        </div>
+                    </div>
+                    <div id="generalizationTestSettings" style="display: none; margin-top: 15px; padding: 15px; background: #f0fdf4; border-radius: 6px; border-left: 4px solid #10b981;">
+                        <div class="config-row">
+                            <div class="config-group">
+                                <label for="generalizationTestDatasetVersion">Test Dataset:</label>
+                                <select id="generalizationTestDatasetVersion" onchange="markConfigDirty()">
+                                    <option value="V1">V1</option>
+                                    <option value="V2" selected>V2</option>
+                                </select>
+                            </div>
+                            <div class="config-group">
+                                <label for="generalizationTestDatasetSplit">Test Split:</label>
+                                <select id="generalizationTestDatasetSplit" onchange="markConfigDirty()">
+                                    <option value="training" selected>Training</option>
+                                    <option value="evaluation">Evaluation</option>
+                                </select>
+                            </div>
+                            <div class="config-group">
+                                <label for="generalizationTestMaxGrids">Max Test Grids:</label>
+                                <input type="number" id="generalizationTestMaxGrids" min="1" max="10000" value="100" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-group">
+                                <label for="generalizationTestInterval">Test Every N Epochs:</label>
+                                <input type="number" id="generalizationTestInterval" min="1" max="1000" value="1" onchange="markConfigDirty()">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Similarity Test -->
+                <div>
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="similarityTestEnabled" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                <input type="checkbox" id="similarityTestEnabled" onchange="markConfigDirty(); updateTestConfigVisibility();" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span style="font-weight: 600;">🔍 Enable Similarity Test</span>
+                            </label>
+                            <span style="font-size: 12px; color: #6b7280; margin-left: 26px;">Test encoding consistency on similar/dissimilar pairs</span>
+                        </div>
+                    </div>
+                    <div id="similarityTestSettings" style="display: none; margin-top: 15px; padding: 15px; background: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;">
+                        <div class="config-row">
+                            <div class="config-group">
+                                <label for="similarityTestInterval">Test Every N Epochs:</label>
+                                <input type="number" id="similarityTestInterval" min="1" max="1000" value="1" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-group">
+                                <label for="similarityTestNumPairs">Num Test Pairs:</label>
+                                <input type="number" id="similarityTestNumPairs" min="10" max="1000" value="50" onchange="markConfigDirty()">
+                                <span style="font-size: 11px; color: #92400e;">(similar + dissimilar each)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Save Button -->
             <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #d0d9ff; text-align: center;">
                 <button id="saveConfigBtn" onclick="saveTaskConfig()" style="padding: 12px 40px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 16px;">
@@ -880,6 +953,15 @@
             <div id="generalizationTestInfo" style="color: #065f46; margin-bottom: 15px;"></div>
             <div id="generalizationTestResults" style="color: #065f46;">
                 <p>No generalization test results available yet.</p>
+            </div>
+        </div>
+
+        <!-- Similarity Test Results -->
+        <div class="info-box" id="similarityTestSection" style="display: none; margin-top: 30px; background: #fef3c7; border-left: 4px solid #f59e0b;">
+            <h3 style="color: #92400e; margin-bottom: 15px;">🔍 Similarity Test Results (Encoding Consistency)</h3>
+            <div id="similarityTestInfo" style="color: #78350f; margin-bottom: 15px;"></div>
+            <div id="similarityTestResults" style="color: #78350f;">
+                <p>No similarity test results available yet.</p>
             </div>
         </div>
 
@@ -959,9 +1041,20 @@
                 document.getElementById('usePretrained').checked = data.use_pretrained;
                 document.getElementById('freezeEncoder').checked = data.freeze_encoder || false;
                 
+                // Testing configuration
+                document.getElementById('generalizationTestEnabled').checked = data.generalization_test_enabled || false;
+                document.getElementById('generalizationTestDatasetVersion').value = data.generalization_test_dataset_version || 'V2';
+                document.getElementById('generalizationTestDatasetSplit').value = data.generalization_test_dataset_split || 'training';
+                document.getElementById('generalizationTestMaxGrids').value = data.generalization_test_max_grids || 100;
+                document.getElementById('generalizationTestInterval').value = data.generalization_test_interval || 1;
+                document.getElementById('similarityTestEnabled').checked = data.similarity_test_enabled || false;
+                document.getElementById('similarityTestInterval').value = data.similarity_test_interval || 1;
+                document.getElementById('similarityTestNumPairs').value = data.similarity_test_num_pairs || 50;
+                
                 updateTaskUILabels();
                 updateBottleneckVisibility();
                 updateDatasetOptionsVisibility();
+                updateTestConfigVisibility();
                 configDirty = false;
                 updateConfigStatus();
                 
@@ -1027,6 +1120,18 @@
                 datasetSplitGroup.style.opacity = '1';
                 useCombinedSplitsGroup.style.opacity = '1';
             }
+        }
+        
+        function updateTestConfigVisibility() {
+            // Show/hide generalization test settings
+            const genEnabled = document.getElementById('generalizationTestEnabled').checked;
+            const genSettings = document.getElementById('generalizationTestSettings');
+            genSettings.style.display = genEnabled ? 'block' : 'none';
+            
+            // Show/hide similarity test settings
+            const simEnabled = document.getElementById('similarityTestEnabled').checked;
+            const simSettings = document.getElementById('similarityTestSettings');
+            simSettings.style.display = simEnabled ? 'block' : 'none';
         }
         
         function updateConfigStatus() {
@@ -1143,6 +1248,16 @@
             const freezeEncoder = document.getElementById('freezeEncoder').checked;
             const loadPretrainedBefore = document.getElementById('loadPretrainedBefore').value;
             
+            // Testing configuration
+            const generalizationTestEnabled = document.getElementById('generalizationTestEnabled').checked;
+            const generalizationTestDatasetVersion = document.getElementById('generalizationTestDatasetVersion').value;
+            const generalizationTestDatasetSplit = document.getElementById('generalizationTestDatasetSplit').value;
+            const generalizationTestMaxGrids = document.getElementById('generalizationTestMaxGrids').value;
+            const generalizationTestInterval = document.getElementById('generalizationTestInterval').value;
+            const similarityTestEnabled = document.getElementById('similarityTestEnabled').checked;
+            const similarityTestInterval = document.getElementById('similarityTestInterval').value;
+            const similarityTestNumPairs = document.getElementById('similarityTestNumPairs').value;
+            
             fetch('/task_config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1177,7 +1292,15 @@
                     pretrain_task_type: pretrainTaskType,
                     use_pretrained: usePretrained,
                     freeze_encoder: freezeEncoder,
-                    load_pretrained_before_pretrain: loadPretrainedBefore || null
+                    load_pretrained_before_pretrain: loadPretrainedBefore || null,
+                    generalization_test_enabled: generalizationTestEnabled,
+                    generalization_test_dataset_version: generalizationTestDatasetVersion,
+                    generalization_test_dataset_split: generalizationTestDatasetSplit,
+                    generalization_test_max_grids: parseInt(generalizationTestMaxGrids),
+                    generalization_test_interval: parseInt(generalizationTestInterval),
+                    similarity_test_enabled: similarityTestEnabled,
+                    similarity_test_interval: parseInt(similarityTestInterval),
+                    similarity_test_num_pairs: parseInt(similarityTestNumPairs)
                 })
             })
             .then(response => response.json())
@@ -1912,6 +2035,105 @@
         // Update generalization test results every 10 seconds
         updateGeneralizationTestResults();
         setInterval(updateGeneralizationTestResults, 10000);
+        
+        // Function to fetch and display similarity test results
+        function updateSimilarityTestResults() {
+            fetch('/similarity_test_results')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Similarity test data:', data);
+                    if (data.available && data.data && data.data.history && data.data.history.length > 0) {
+                        const section = document.getElementById('similarityTestSection');
+                        const info = document.getElementById('similarityTestInfo');
+                        const results = document.getElementById('similarityTestResults');
+                        
+                        section.style.display = 'block';
+                        
+                        // Display metadata
+                        info.innerHTML = `
+                            <p><strong>Training Dataset:</strong> ${data.data.training_dataset}/${data.data.training_split}</p>
+                            <p><strong>Task Type:</strong> ${data.data.task_type}</p>
+                            <p><strong>Bottleneck Type:</strong> ${data.data.bottleneck_type}</p>
+                        `;
+                        
+                        // Display results table
+                        let tableHTML = `
+                            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                                <thead>
+                                    <tr style="background: #fef3c7; border-bottom: 2px solid #fbbf24;">
+                                        <th style="padding: 8px; text-align: left;">Epoch</th>
+                                        <th style="padding: 8px; text-align: left;">Test Passed</th>
+                                        <th style="padding: 8px; text-align: left;">Similar (Cosine)</th>
+                                        <th style="padding: 8px; text-align: left;">Dissimilar (Cosine)</th>
+                                        <th style="padding: 8px; text-align: left;">Difference</th>
+                                        <th style="padding: 8px; text-align: left;">Geometric</th>
+                                        <th style="padding: 8px; text-align: left;">Color</th>
+                                        <th style="padding: 8px; text-align: left;">Train Acc</th>
+                                        <th style="padding: 8px; text-align: left;">Val Acc</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        // Show most recent tests (last 10)
+                        const recentTests = data.data.history.slice(-10).reverse();
+                        recentTests.forEach(test => {
+                            const passed = test.test_passed ? '✓' : '✗';
+                            const passedColor = test.test_passed ? '#10b981' : '#ef4444';
+                            const cosine = test.cosine_similarity || {};
+                            
+                            tableHTML += `
+                                <tr style="border-bottom: 1px solid #fde68a;">
+                                    <td style="padding: 8px;">${test.epoch || 'N/A'}</td>
+                                    <td style="padding: 8px; font-weight: 600; color: ${passedColor};">${passed}</td>
+                                    <td style="padding: 8px;">${cosine.similar_mean ? cosine.similar_mean.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${cosine.dissimilar_mean ? cosine.dissimilar_mean.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px; font-weight: 600;">${cosine.difference ? cosine.difference.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${cosine.geometric_mean ? cosine.geometric_mean.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${cosine.color_mean ? cosine.color_mean.toFixed(4) : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.train_acc ? test.train_acc.toFixed(2) + '%' : 'N/A'}</td>
+                                    <td style="padding: 8px;">${test.val_acc ? test.val_acc.toFixed(2) + '%' : 'N/A'}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        tableHTML += `
+                                </tbody>
+                            </table>
+                        `;
+                        
+                        if (data.data.history.length > 10) {
+                            tableHTML += `<p style="margin-top: 10px; font-size: 12px; color: #6b7280;">Showing most recent 10 of ${data.data.history.length} tests</p>`;
+                        }
+                        
+                        // Add explanation
+                        tableHTML += `
+                            <div style="margin-top: 15px; padding: 10px; background: #fffbeb; border: 1px solid #fbbf24; border-radius: 4px;">
+                                <p style="margin: 0; font-size: 13px;"><strong>How to read these results:</strong></p>
+                                <ul style="margin: 5px 0 0 20px; padding: 0; font-size: 12px;">
+                                    <li><strong>Cosine Similarity:</strong> Higher values mean more similar encodings (1.0 = identical, -1.0 = opposite)</li>
+                                    <li><strong>Test Passed:</strong> ✓ if similar grids have more similar encodings than random pairs</li>
+                                    <li><strong>Difference:</strong> Positive values indicate similar grids are encoded more similarly</li>
+                                    <li><strong>Geometric/Color:</strong> Cosine similarity for geometric vs. color transformations</li>
+                                </ul>
+                            </div>
+                        `;
+                        
+                        results.innerHTML = tableHTML;
+                    } else {
+                        // Hide section if no results available
+                        document.getElementById('similarityTestSection').style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching similarity test results:', error);
+                    document.getElementById('similarityTestSection').style.display = 'none';
+                });
+        }
+        
+        // Update similarity test results every 10 seconds
+        updateSimilarityTestResults();
+        setInterval(updateSimilarityTestResults, 10000);
         
         setInterval(() => {
             fetch('/status')
