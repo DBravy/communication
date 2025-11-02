@@ -213,6 +213,10 @@ def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, traini
         'latent_dim': training_state['latent_dim'],
         'num_conv_layers': training_state['num_conv_layers'],
         
+        # β-VAE configuration
+        'use_beta_vae': training_state.get('use_beta_vae', False),
+        'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
+        
         # Communication protocol
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
@@ -270,6 +274,9 @@ training_state = {
     'num_conv_layers': getattr(config, 'NUM_CONV_LAYERS', 3),
     'encoder_conv_channels': getattr(config, 'ENCODER_CONV_CHANNELS', None),  # list[int] or int or None
     'lstm_hidden_dim': getattr(config, 'LSTM_HIDDEN_DIM', None),  # None => default to hidden_dim in model
+    # β-VAE configuration
+    'use_beta_vae': getattr(config, 'USE_BETA_VAE', False),
+    'beta_vae_beta': getattr(config, 'BETA_VAE_BETA', 4.0),
     # Communication protocol
     'vocab_size': getattr(config, 'VOCAB_SIZE', 100),
     'max_message_length': getattr(config, 'MAX_MESSAGE_LENGTH', 3),
@@ -796,7 +803,8 @@ def pretrain_worker():
             hidden_dim=training_state['hidden_dim'],
             latent_dim=training_state['latent_dim'],
             num_conv_layers=training_state['num_conv_layers'],
-            conv_channels=training_state.get('encoder_conv_channels', None)
+            conv_channels=training_state.get('encoder_conv_channels', None),
+            use_beta_vae=training_state.get('use_beta_vae', False)
         )
         
         # PRETRAINING STEP 1: Optionally load a checkpoint to CONTINUE pretraining
@@ -1300,7 +1308,8 @@ def train_worker():
             hidden_dim=training_state['hidden_dim'],
             latent_dim=training_state['latent_dim'],
             num_conv_layers=training_state['num_conv_layers'],
-            conv_channels=training_state.get('encoder_conv_channels', None)
+            conv_channels=training_state.get('encoder_conv_channels', None),
+            use_beta_vae=training_state.get('use_beta_vae', False)
         )
         
         # MAIN TRAINING STEP 1: Optionally load pretrained encoder from Step 1 (pretraining)
@@ -1492,6 +1501,21 @@ def train_worker():
                             batch_total += actual_h * actual_w
                         
                         loss = batch_loss / len(logits_list)
+                        
+                        # Add KL divergence loss for β-VAE (only for autoencoder bottleneck with reconstruction task)
+                        if (training_state.get('use_beta_vae', False) and 
+                            training_state['bottleneck_type'] == 'autoencoder' and
+                            hasattr(model.encoder, 'last_mu') and 
+                            model.encoder.last_mu is not None):
+                            
+                            mu = model.encoder.last_mu
+                            logvar = model.encoder.last_logvar
+                            # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+                            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+                            kl_loss = kl_loss / mu.size(0)  # Average over batch
+                            
+                            beta = training_state.get('beta_vae_beta', 4.0)
+                            loss = loss + beta * kl_loss
                     else:
                         # Original: reconstruct the same grid
                         model_output = model(input_grids, input_sizes, temperature=training_state['temperature'])
@@ -1524,6 +1548,21 @@ def train_worker():
                             batch_total += actual_h * actual_w
                         
                         loss = batch_loss / len(logits_list)
+                        
+                        # Add KL divergence loss for β-VAE (only for autoencoder bottleneck with reconstruction task)
+                        if (training_state.get('use_beta_vae', False) and 
+                            training_state['bottleneck_type'] == 'autoencoder' and
+                            hasattr(model.encoder, 'last_mu') and 
+                            model.encoder.last_mu is not None):
+                            
+                            mu = model.encoder.last_mu
+                            logvar = model.encoder.last_logvar
+                            # KL divergence: -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+                            kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+                            kl_loss = kl_loss / mu.size(0)  # Average over batch
+                            
+                            beta = training_state.get('beta_vae_beta', 4.0)
+                            loss = loss + beta * kl_loss
                 
                 loss.backward()
                 optimizer.step()
@@ -1878,7 +1917,8 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     hidden_dim=config.HIDDEN_DIM,
                     latent_dim=config.LATENT_DIM,
                     num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-                    conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
+                    conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None),
+                    use_beta_vae=getattr(config, 'USE_BETA_VAE', False)
                 )
                 
                 model = ARCAutoencoder(
@@ -2239,7 +2279,8 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             hidden_dim=config.HIDDEN_DIM,
             latent_dim=config.LATENT_DIM,
             num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-            conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
+            conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None),
+            use_beta_vae=getattr(config, 'USE_BETA_VAE', False)
         )
         
         model = ARCAutoencoder(
@@ -3344,7 +3385,8 @@ def solve_puzzle_route():
             embedding_dim=config.EMBEDDING_DIM,
             hidden_dim=config.HIDDEN_DIM,
             latent_dim=config.LATENT_DIM,
-            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3)
+            num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
+            use_beta_vae=getattr(config, 'USE_BETA_VAE', False)
         )
         
         if not os.path.exists(checkpoint_path):
