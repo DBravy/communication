@@ -727,6 +727,11 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
                 
                 loss = batch_loss / len(logits_list)
         
+        # For β-VAE: add KL divergence term to the loss
+        kl_div = torch.tensor(0.0)
+        if hasattr(model, 'use_beta_vae') and model.use_beta_vae and task_type == 'reconstruction':
+            loss, kl_div = model.compute_beta_vae_loss(loss)
+        
         # Backward pass
         loss.backward()
         optimizer.step()
@@ -752,6 +757,9 @@ def train_epoch(model, dataloader, optimizer, criterion, device, temperature, pl
             }
             if config.BOTTLENECK_TYPE == 'communication':
                 postfix['temp'] = f'{temperature:.2f}'
+            # Add KL divergence to progress bar for β-VAE
+            if hasattr(model, 'use_beta_vae') and model.use_beta_vae and task_type == 'reconstruction':
+                postfix['kl'] = f'{kl_div.item():.4f}'
             pbar.set_postfix(postfix)
     
     return total_loss / len(dataloader), 100. * correct / total if total > 0 else 0.0
@@ -1889,7 +1897,8 @@ def main():
         hidden_dim=config.HIDDEN_DIM,
         latent_dim=config.LATENT_DIM,
         num_conv_layers=num_conv_layers,
-        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
+        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None),
+        use_beta_vae=getattr(config, 'USE_BETA_VAE', False)
     )
     
     # Load pretrained encoder if available and enabled
@@ -1915,7 +1924,9 @@ def main():
         receiver_gets_input_puzzle=receiver_gets_input_puzzle,
         use_stop_token=use_stop_token,
         stop_token_id=stop_token_id,
-        lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
+        lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None),
+        use_beta_vae=getattr(config, 'USE_BETA_VAE', False),
+        beta=getattr(config, 'BETA_VAE_BETA', 4.0)
     ).to(device)
     
     # Freeze encoder if configured
@@ -2235,7 +2246,8 @@ def train_puzzle_solving_mode(device):
         hidden_dim=config.HIDDEN_DIM,
         latent_dim=config.LATENT_DIM,
         num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
-        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None)
+        conv_channels=getattr(config, 'ENCODER_CONV_CHANNELS', None),
+        use_beta_vae=getattr(config, 'USE_BETA_VAE', False)
     )
     
     # Load pretrained encoder if available
@@ -2377,5 +2389,3 @@ def train_puzzle_solving_mode(device):
 
 if __name__ == '__main__':
     main()
-
-

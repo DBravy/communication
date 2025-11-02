@@ -21,7 +21,9 @@ MAX_GRID_SIZE = 30  # Maximum grid size for reconstruction
 NUM_CONV_LAYERS = 3  # Number of convolutional layers in encoder (1-3 recommended)
 
 # Bottleneck Type
-BOTTLENECK_TYPE = 'communication'  # 'communication' or 'autoencoder'
+USE_BETA_VAE = True
+BETA_VAE_BETA = 4.0  # Paper suggests β values like 4, 5, 20, 250 depending on dataset
+BOTTLENECK_TYPE = 'autoencoder'  # β-VAE only works with autoencoder mode
 
 # Task Type
 TASK_TYPE = 'reconstruction'  # 'reconstruction', 'selection', 'puzzle_classification', 'puzzle_solving'

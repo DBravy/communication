@@ -13,14 +13,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class ARCEncoder(nn.Module):
-    """Encodes 30x30 ARC grids into fixed-size representations."""
+    """Encodes 30x30 ARC grids into fixed-size representations.
+    
+    Supports β-VAE: when use_beta_vae=True, outputs parameters for a Gaussian distribution
+    (mean and log variance) and uses the reparameterization trick.
+    """
     def __init__(self, 
                  num_colors=10,
                  embedding_dim=10,
                  hidden_dim=128,
                  latent_dim=512,
                  num_conv_layers=3,
-                 conv_channels=None):
+                 conv_channels=None,
+                 use_beta_vae=False):
         super().__init__()
         
         self.num_colors = num_colors
@@ -28,6 +33,7 @@ class ARCEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
         self.num_conv_layers = num_conv_layers
+        self.use_beta_vae = use_beta_vae
         
         # Configure per-layer output channels for conv stack
         if conv_channels is None:
@@ -56,11 +62,37 @@ class ARCEncoder(nn.Module):
             self.bn_layers.append(nn.BatchNorm2d(out_channels))
         
         self.pool = nn.AdaptiveAvgPool2d((4, 4))
-        self.fc = nn.Linear(self.conv_channels[-1] * 4 * 4, latent_dim)
+        
+        # For β-VAE, we need separate layers for mean and log variance
+        if use_beta_vae:
+            self.fc_mu = nn.Linear(self.conv_channels[-1] * 4 * 4, latent_dim)
+            self.fc_logvar = nn.Linear(self.conv_channels[-1] * 4 * 4, latent_dim)
+        else:
+            self.fc = nn.Linear(self.conv_channels[-1] * 4 * 4, latent_dim)
         
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(0.1)
         
+        # Store last mu and logvar for KL divergence calculation
+        self.last_mu = None
+        self.last_logvar = None
+        
+    
+    def reparameterize(self, mu, logvar):
+        """
+        Reparameterization trick for β-VAE: z = μ + σ * ε, where ε ~ N(0, I)
+        
+        Args:
+            mu: Mean of the latent Gaussian [B, latent_dim]
+            logvar: Log variance of the latent Gaussian [B, latent_dim]
+            
+        Returns:
+            z: Sampled latent vector [B, latent_dim]
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+    
     def forward(self, x, sizes=None):
         B = x.shape[0]
         
@@ -86,9 +118,28 @@ class ARCEncoder(nn.Module):
         
         x = x.reshape(B, -1)
         x = self.dropout(x)
-        latent = self.relu(self.fc(x))
         
-        return latent
+        if self.use_beta_vae:
+            # β-VAE mode: output mean and log variance, then sample
+            mu = self.fc_mu(x)
+            logvar = self.fc_logvar(x)
+            
+            # Store for KL divergence calculation
+            self.last_mu = mu
+            self.last_logvar = logvar
+            
+            # Sample using reparameterization trick
+            if self.training:
+                z = self.reparameterize(mu, logvar)
+            else:
+                # During inference, use the mean
+                z = mu
+            
+            return z
+        else:
+            # Standard autoencoder mode
+            latent = self.relu(self.fc(x))
+            return latent
     
     def extract_feature_maps(self, x, sizes=None):
         """Returns intermediate CNN feature maps for visualization."""
@@ -653,11 +704,13 @@ class ARCAutoencoder(nn.Module):
     """
     FIXED: Main model with proper gradient flow through communication.
     Supports variable-length messages via stop tokens.
+    Supports β-VAE with adjustable β hyperparameter.
     """
     def __init__(self, encoder, vocab_size, max_length, num_colors, embedding_dim, hidden_dim, 
                  max_grid_size=30, bottleneck_type='communication', task_type='reconstruction', 
                  num_conv_layers=2, num_classes=None, receiver_gets_input_puzzle=False,
-                 use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None):
+                 use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None,
+                 use_beta_vae=False, beta=4.0):
         super().__init__()
         self.encoder = encoder
         self.bottleneck_type = bottleneck_type
@@ -666,6 +719,8 @@ class ARCAutoencoder(nn.Module):
         self.use_stop_token = use_stop_token
         self.stop_token_id = stop_token_id
         self.lstm_hidden_dim = lstm_hidden_dim
+        self.use_beta_vae = use_beta_vae
+        self.beta = beta
         
         if bottleneck_type == 'communication':
             self.sender = SenderAgent(encoder, vocab_size, max_length, use_stop_token=use_stop_token, stop_token_id=stop_token_id, lstm_hidden_dim=self.lstm_hidden_dim)
@@ -884,6 +939,45 @@ class ARCAutoencoder(nn.Module):
             
             else:
                 raise NotImplementedError("Puzzle classification not yet supported in autoencoder mode")
+    
+    def compute_beta_vae_loss(self, reconstruction_loss):
+        """
+        Compute β-VAE loss by adding the KL divergence term.
+        
+        According to the β-VAE paper:
+        L(θ, φ; x, z, β) = E[log p(x|z)] - β * KL(q(z|x)||p(z))
+        
+        where p(z) = N(0, I) is the isotropic unit Gaussian prior.
+        
+        Args:
+            reconstruction_loss: The reconstruction loss E[-log p(x|z)]
+            
+        Returns:
+            total_loss: Combined reconstruction loss and KL divergence
+            kl_div: The KL divergence value (for logging)
+        """
+        if not self.use_beta_vae or not hasattr(self.encoder, 'last_mu'):
+            # β-VAE not enabled or encoder doesn't support it
+            return reconstruction_loss, torch.tensor(0.0)
+        
+        mu = self.encoder.last_mu
+        logvar = self.encoder.last_logvar
+        
+        if mu is None or logvar is None:
+            # No latent variables stored (shouldn't happen during training)
+            return reconstruction_loss, torch.tensor(0.0)
+        
+        # KL divergence between q(z|x) and p(z) = N(0, I)
+        # KL(q(z|x)||p(z)) = -0.5 * sum(1 + log(σ²) - μ² - σ²)
+        kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        
+        # Average over batch
+        kl_div = kl_div / mu.size(0)
+        
+        # Combine with reconstruction loss using β weighting
+        total_loss = reconstruction_loss + self.beta * kl_div
+        
+        return total_loss, kl_div
 
 class ARCPuzzleSolver(nn.Module):
     """
