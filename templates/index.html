@@ -684,6 +684,20 @@
                         <input type="number" id="lstmHiddenDim" min="16" max="2048" step="16" placeholder="(default = hidden dim)" onchange="markConfigDirty()">
                     </div>
                 </div>
+                <div class="config-row" style="margin-top: 15px;">
+                    <div class="config-group">
+                        <label for="useBetaVAE" style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="useBetaVAE" onchange="markConfigDirty(); updateBetaVAEVisibility();">
+                            <span>🔬 Use β-VAE</span>
+                        </label>
+                        <span style="font-size: 11px; color: #6b7280;">(Disentangled representations with KL regularization)</span>
+                    </div>
+                    <div class="config-group" id="betaVAEBetaGroup" style="display: none;">
+                        <label for="betaVAEBeta">β Value:</label>
+                        <input type="number" id="betaVAEBeta" min="0.1" max="1000" step="0.1" value="4.0" onchange="markConfigDirty()">
+                        <span style="font-size: 11px; color: #6b7280;">(Higher = more disentanglement)</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Communication Protocol -->
@@ -1022,6 +1036,10 @@
                 document.getElementById('encoderConvChannels').value = (data.encoder_conv_channels === null || data.encoder_conv_channels === undefined) ? '' : (Array.isArray(data.encoder_conv_channels) ? JSON.stringify(data.encoder_conv_channels) : data.encoder_conv_channels);
                 document.getElementById('lstmHiddenDim').value = data.lstm_hidden_dim || '';
                 
+                // β-VAE configuration
+                document.getElementById('useBetaVAE').checked = data.use_beta_vae || false;
+                document.getElementById('betaVAEBeta').value = data.beta_vae_beta || 4.0;
+                
                 // Communication protocol
                 document.getElementById('vocabSize').value = data.vocab_size || 100;
                 document.getElementById('maxMessageLength').value = data.max_message_length || 3;
@@ -1055,6 +1073,7 @@
                 updateBottleneckVisibility();
                 updateDatasetOptionsVisibility();
                 updateTestConfigVisibility();
+                updateBetaVAEVisibility();
                 configDirty = false;
                 updateConfigStatus();
                 
@@ -1087,6 +1106,16 @@
                 commSection.style.display = 'block';
             } else {
                 commSection.style.display = 'none';
+            }
+        }
+        
+        function updateBetaVAEVisibility() {
+            const useBetaVAE = document.getElementById('useBetaVAE').checked;
+            const betaVAEBetaGroup = document.getElementById('betaVAEBetaGroup');
+            if (useBetaVAE) {
+                betaVAEBetaGroup.style.display = 'flex';
+            } else {
+                betaVAEBetaGroup.style.display = 'none';
             }
         }
         
@@ -1228,6 +1257,10 @@
             }
             const lstmHiddenDim = document.getElementById('lstmHiddenDim').value;
             
+            // β-VAE configuration
+            const useBetaVAE = document.getElementById('useBetaVAE').checked;
+            const betaVAEBeta = document.getElementById('betaVAEBeta').value;
+            
             // Communication protocol
             const vocabSize = document.getElementById('vocabSize').value;
             const maxMessageLength = document.getElementById('maxMessageLength').value;
@@ -1279,6 +1312,8 @@
                     num_conv_layers: parseInt(numConvLayers),
                     encoder_conv_channels: encoderConvChannels,
                     lstm_hidden_dim: lstmHiddenDim ? parseInt(lstmHiddenDim) : null,
+                    use_beta_vae: useBetaVAE,
+                    beta_vae_beta: parseFloat(betaVAEBeta),
                     vocab_size: parseInt(vocabSize),
                     max_message_length: parseInt(maxMessageLength),
                     temperature: parseFloat(temperature),

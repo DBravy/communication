@@ -2713,6 +2713,9 @@ def get_task_config():
         'num_conv_layers': training_state['num_conv_layers'],
         'encoder_conv_channels': training_state['encoder_conv_channels'],
         'lstm_hidden_dim': training_state['lstm_hidden_dim'],
+        # β-VAE configuration
+        'use_beta_vae': training_state.get('use_beta_vae', False),
+        'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
         # Communication protocol
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
@@ -2810,6 +2813,12 @@ def set_task_config():
     if 'lstm_hidden_dim' in data:
         training_state['lstm_hidden_dim'] = int(data['lstm_hidden_dim']) if data['lstm_hidden_dim'] is not None else None
     
+    # β-VAE configuration
+    if 'use_beta_vae' in data:
+        training_state['use_beta_vae'] = bool(data['use_beta_vae'])
+    if 'beta_vae_beta' in data:
+        training_state['beta_vae_beta'] = float(data['beta_vae_beta'])
+    
     # Communication protocol
     if 'vocab_size' in data:
         training_state['vocab_size'] = int(data['vocab_size'])
@@ -2886,6 +2895,8 @@ def set_task_config():
         'num_conv_layers': training_state['num_conv_layers'],
         'encoder_conv_channels': training_state['encoder_conv_channels'],
         'lstm_hidden_dim': training_state['lstm_hidden_dim'],
+        'use_beta_vae': training_state.get('use_beta_vae', False),
+        'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
