@@ -23,7 +23,17 @@ NUM_CONV_LAYERS = 3  # Number of convolutional layers in encoder (1-3 recommende
 # Bottleneck Type
 USE_BETA_VAE = True
 BETA_VAE_BETA = 4.0  # Paper suggests β values like 4, 5, 20, 250 depending on dataset
-BOTTLENECK_TYPE = 'autoencoder'  # β-VAE only works with autoencoder mode
+BOTTLENECK_TYPE = 'slot_attention'  # Options: 'autoencoder', 'communication', 'slot_attention'
+                                     # - 'autoencoder': continuous latent representation (supports β-VAE)
+                                     # - 'communication': discrete message passing
+                                     # - 'slot_attention': object-centric slot representations
+
+# Slot Attention Configuration (add after BOTTLENECK_TYPE)
+NUM_SLOTS = 7  # Number of slots (K in the paper)
+SLOT_DIM = 64  # Dimension of each slot
+SLOT_ITERATIONS = 3  # Number of attention iterations (T in the paper)
+SLOT_HIDDEN_DIM = 128  # Hidden dimension for slot MLP
+SLOT_EPS = 1e-8  # Small epsilon for numerical stability
 
 # Task Type
 TASK_TYPE = 'reconstruction'  # 'reconstruction', 'selection', 'puzzle_classification', 'puzzle_solving'

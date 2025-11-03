@@ -578,9 +578,10 @@
                     </div>
                     <div class="config-group">
                         <label for="bottleneckType">Bottleneck Type:</label>
-                        <select id="bottleneckType" onchange="markConfigDirty()">
+                        <select id="bottleneckType" onchange="markConfigDirty(); updateBottleneckVisibility();">
                             <option value="communication">Communication</option>
                             <option value="autoencoder">Autoencoder</option>
+                            <option value="slot_attention">Slot Attention</option>
                         </select>
                     </div>
                     <div class="config-group">
@@ -696,6 +697,38 @@
                         <label for="betaVAEBeta">β Value:</label>
                         <input type="number" id="betaVAEBeta" min="0.1" max="1000" step="0.1" value="4.0" onchange="markConfigDirty()">
                         <span style="font-size: 11px; color: #6b7280;">(Higher = more disentanglement)</span>
+                    </div>
+                </div>
+                
+                <!-- Slot Attention Configuration -->
+                <div class="config-section" id="slotAttentionConfigSection" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; display: none;">
+                    <h3 style="margin-bottom: 15px;">🎰 Slot Attention Configuration</h3>
+                    <span style="font-size: 11px; color: #6b7280; display: block; margin-bottom: 15px;">(Object-centric representations - only active when bottleneck_type='slot_attention')</span>
+                    
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="numSlots">Number of Slots:</label>
+                            <input type="number" id="numSlots" min="1" max="20" value="7" onchange="markConfigDirty()">
+                            <span style="font-size: 11px; color: #6b7280;">(K in paper - number of object slots)</span>
+                        </div>
+                        <div class="config-group">
+                            <label for="slotDim">Slot Dimension:</label>
+                            <input type="number" id="slotDim" min="16" max="512" value="64" onchange="markConfigDirty()">
+                            <span style="font-size: 11px; color: #6b7280;">(Dimension of each slot)</span>
+                        </div>
+                    </div>
+                    
+                    <div class="config-row">
+                        <div class="config-group">
+                            <label for="slotIterations">Attention Iterations:</label>
+                            <input type="number" id="slotIterations" min="1" max="10" value="3" onchange="markConfigDirty()">
+                            <span style="font-size: 11px; color: #6b7280;">(T in paper - refinement iterations)</span>
+                        </div>
+                        <div class="config-group">
+                            <label for="slotHiddenDim">MLP Hidden Dim:</label>
+                            <input type="number" id="slotHiddenDim" min="16" max="512" value="128" onchange="markConfigDirty()">
+                            <span style="font-size: 11px; color: #6b7280;">(Hidden dimension for slot MLP)</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1040,6 +1073,12 @@
                 document.getElementById('useBetaVAE').checked = data.use_beta_vae || false;
                 document.getElementById('betaVAEBeta').value = data.beta_vae_beta || 4.0;
                 
+                // Slot Attention configuration
+                document.getElementById('numSlots').value = data.num_slots || 7;
+                document.getElementById('slotDim').value = data.slot_dim || 64;
+                document.getElementById('slotIterations').value = data.slot_iterations || 3;
+                document.getElementById('slotHiddenDim').value = data.slot_hidden_dim || 128;
+                
                 // Communication protocol
                 document.getElementById('vocabSize').value = data.vocab_size || 100;
                 document.getElementById('maxMessageLength').value = data.max_message_length || 3;
@@ -1102,10 +1141,20 @@
         function updateBottleneckVisibility() {
             const bottleneckType = document.getElementById('bottleneckType').value;
             const commSection = document.getElementById('commSection');
+            const slotAttentionSection = document.getElementById('slotAttentionConfigSection');
+            
+            // Show/hide communication section
             if (bottleneckType === 'communication') {
                 commSection.style.display = 'block';
             } else {
                 commSection.style.display = 'none';
+            }
+            
+            // Show/hide slot attention section
+            if (bottleneckType === 'slot_attention') {
+                slotAttentionSection.style.display = 'block';
+            } else {
+                slotAttentionSection.style.display = 'none';
             }
         }
         
@@ -1261,6 +1310,12 @@
             const useBetaVAE = document.getElementById('useBetaVAE').checked;
             const betaVAEBeta = document.getElementById('betaVAEBeta').value;
             
+            // Slot Attention configuration
+            const numSlots = document.getElementById('numSlots').value;
+            const slotDim = document.getElementById('slotDim').value;
+            const slotIterations = document.getElementById('slotIterations').value;
+            const slotHiddenDim = document.getElementById('slotHiddenDim').value;
+            
             // Communication protocol
             const vocabSize = document.getElementById('vocabSize').value;
             const maxMessageLength = document.getElementById('maxMessageLength').value;
@@ -1314,6 +1369,10 @@
                     lstm_hidden_dim: lstmHiddenDim ? parseInt(lstmHiddenDim) : null,
                     use_beta_vae: useBetaVAE,
                     beta_vae_beta: parseFloat(betaVAEBeta),
+                    num_slots: parseInt(numSlots),
+                    slot_dim: parseInt(slotDim),
+                    slot_iterations: parseInt(slotIterations),
+                    slot_hidden_dim: parseInt(slotHiddenDim),
                     vocab_size: parseInt(vocabSize),
                     max_message_length: parseInt(maxMessageLength),
                     temperature: parseFloat(temperature),

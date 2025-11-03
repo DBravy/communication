@@ -168,6 +168,39 @@ class ARCEncoder(nn.Module):
             
             feats["pooled"] = pooled
             return feats
+    
+    def get_spatial_features(self, x, sizes=None):
+        """
+        Extract spatial feature maps before pooling for slot attention.
+        
+        Returns:
+            features: [B, C, H, W] spatial features
+        """
+        B = x.shape[0]
+        
+        # One-hot encode
+        x = F.one_hot(x.long(), num_classes=self.num_colors).float()
+        x = x.permute(0, 3, 1, 2)
+        
+        # Convolutional layers
+        for conv, bn in zip(self.conv_layers, self.bn_layers):
+            x = self.relu(bn(conv(x)))
+        
+        # If sizes are provided, mask out padding (NON-INPLACE)
+        if sizes is not None:
+            # Create a mask instead of modifying in-place
+            _, C, H, W = x.shape
+            mask = torch.ones_like(x)
+            for i in range(B):
+                h, w = sizes[i]
+                # Zero out padding regions in the mask
+                mask[i, :, h:, :] = 0
+                mask[i, :, :, w:] = 0
+            # Apply mask (non-inplace)
+            x = x * mask
+        
+        return x
+
 
 
 class ARCDecoder(nn.Module):
@@ -220,6 +253,187 @@ class ARCDecoder(nn.Module):
                                   mode='bilinear', align_corners=False)
         
         return logits
+
+
+class SlotAttention(nn.Module):
+    """
+    Slot Attention module for object-centric learning.
+    
+    Based on "Object-Centric Learning with Slot Attention" (Locatello et al., 2020).
+    Learns to decompose input features into a fixed number of slots through iterative attention.
+    """
+    def __init__(self, num_slots, slot_dim, feature_dim, num_iterations=3, hidden_dim=128, eps=1e-8):
+        super().__init__()
+        self.num_slots = num_slots
+        self.slot_dim = slot_dim
+        self.feature_dim = feature_dim
+        self.num_iterations = num_iterations
+        self.eps = eps
+        
+        # Learned slot initialization parameters
+        self.slots_mu = nn.Parameter(torch.randn(1, 1, slot_dim))
+        self.slots_log_sigma = nn.Parameter(torch.zeros(1, 1, slot_dim))
+        
+        # Layer norm for slots and inputs
+        self.norm_slots = nn.LayerNorm(slot_dim)
+        self.norm_inputs = nn.LayerNorm(feature_dim)
+        
+        # Linear maps for attention (Q, K, V)
+        self.project_q = nn.Linear(slot_dim, slot_dim, bias=False)
+        self.project_k = nn.Linear(feature_dim, slot_dim, bias=False)
+        self.project_v = nn.Linear(feature_dim, slot_dim, bias=False)
+        
+        # Slot update functions
+        self.gru = nn.GRUCell(slot_dim, slot_dim)
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(slot_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, slot_dim)
+        )
+        
+    def forward(self, inputs):
+        """
+        Args:
+            inputs: Feature maps [B, H*W, feature_dim] or [B, num_features, feature_dim]
+            
+        Returns:
+            slots: [B, num_slots, slot_dim]
+        """
+        B, N, D = inputs.shape
+        
+        # Initialize slots from learned distribution
+        mu = self.slots_mu.expand(B, self.num_slots, -1)
+        sigma = self.slots_log_sigma.exp().expand(B, self.num_slots, -1)
+        slots = mu + sigma * torch.randn_like(mu)
+        
+        # Normalize inputs
+        inputs = self.norm_inputs(inputs)
+        k = self.project_k(inputs)  # [B, N, slot_dim]
+        v = self.project_v(inputs)  # [B, N, slot_dim]
+        
+        # Iterative attention
+        for _ in range(self.num_iterations):
+            slots_prev = slots
+            slots = self.norm_slots(slots)
+            
+            # Attention
+            q = self.project_q(slots)  # [B, num_slots, slot_dim]
+            
+            # Compute attention weights
+            # [B, num_slots, slot_dim] @ [B, slot_dim, N] -> [B, num_slots, N]
+            attn_logits = torch.bmm(q, k.transpose(-1, -2)) / (self.slot_dim ** 0.5)
+            attn = F.softmax(attn_logits, dim=-1)  # Softmax over slots
+            
+            # Normalize attention weights across slots (competition)
+            attn = attn + self.eps
+            attn = attn / attn.sum(dim=1, keepdim=True)
+            
+            # Weighted mean
+            # [B, num_slots, N] @ [B, N, slot_dim] -> [B, num_slots, slot_dim]
+            updates = torch.bmm(attn, v)
+            
+            # Update slots with GRU
+            slots = self.gru(
+                updates.reshape(B * self.num_slots, self.slot_dim),
+                slots_prev.reshape(B * self.num_slots, self.slot_dim)
+            )
+            slots = slots.reshape(B, self.num_slots, self.slot_dim)
+            
+            # Apply MLP
+            slots = slots + self.mlp(slots)
+        
+        return slots
+
+
+class SlotDecoder(nn.Module):
+    """
+    Decoder for slot attention that reconstructs the grid from slots.
+    Each slot is decoded independently and combined via broadcasting.
+    """
+    def __init__(self, slot_dim, num_colors, hidden_dim, max_grid_size=30):
+        super().__init__()
+        self.slot_dim = slot_dim
+        self.num_colors = num_colors
+        self.hidden_dim = hidden_dim
+        self.max_grid_size = max_grid_size
+        
+        # Decode each slot to a spatial feature map
+        self.fc_decode = nn.Linear(slot_dim, hidden_dim * 4 * 4)
+        
+        self.deconv1 = nn.ConvTranspose2d(hidden_dim, hidden_dim,
+                                         kernel_size=4, stride=2, padding=1)
+        self.bn_d1 = nn.BatchNorm2d(hidden_dim)
+        
+        self.deconv2 = nn.ConvTranspose2d(hidden_dim, hidden_dim,
+                                         kernel_size=4, stride=2, padding=1)
+        self.bn_d2 = nn.BatchNorm2d(hidden_dim)
+        
+        self.deconv3 = nn.ConvTranspose2d(hidden_dim, hidden_dim,
+                                         kernel_size=4, stride=2, padding=1)
+        self.bn_d3 = nn.BatchNorm2d(hidden_dim)
+        
+        self.conv_out1 = nn.Conv2d(hidden_dim, hidden_dim,
+                                   kernel_size=3, padding=1)
+        self.bn_out1 = nn.BatchNorm2d(hidden_dim)
+        
+        # Output: num_colors + 1 for alpha mask
+        self.conv_out = nn.Conv2d(hidden_dim, num_colors + 1, kernel_size=1)
+        
+        self.relu = nn.ReLU()
+    
+    def decode_slot(self, slot):
+        """Decode a single slot to spatial features."""
+        x = self.relu(self.fc_decode(slot))
+        x = x.reshape(-1, self.hidden_dim, 4, 4)
+        
+        x = self.relu(self.bn_d1(self.deconv1(x)))
+        x = self.relu(self.bn_d2(self.deconv2(x)))
+        x = self.relu(self.bn_d3(self.deconv3(x)))
+        x = self.relu(self.bn_out1(self.conv_out1(x)))
+        
+        x = self.conv_out(x)  # [num_slots, num_colors+1, H, W]
+        
+        return x
+    
+    def forward(self, slots, target_size):
+        """
+        Args:
+            slots: [B, num_slots, slot_dim]
+            target_size: (H, W) target output size
+            
+        Returns:
+            logits: [B, num_colors, H, W]
+        """
+        B, num_slots, slot_dim = slots.shape
+        H, W = target_size
+        
+        # Decode all slots
+        slots_flat = slots.reshape(B * num_slots, slot_dim)
+        decoded = self.decode_slot(slots_flat)  # [B*num_slots, num_colors+1, 32, 32]
+        
+        # Reshape to [B, num_slots, num_colors+1, 32, 32]
+        decoded = decoded.reshape(B, num_slots, self.num_colors + 1, 
+                                 decoded.shape[-2], decoded.shape[-1])
+        
+        # Resize to target size
+        if H != decoded.shape[-2] or W != decoded.shape[-1]:
+            decoded = F.interpolate(decoded.reshape(B * num_slots, self.num_colors + 1,
+                                                   decoded.shape[-2], decoded.shape[-1]),
+                                   size=(H, W), mode='bilinear', align_corners=False)
+            decoded = decoded.reshape(B, num_slots, self.num_colors + 1, H, W)
+        
+        # Split into reconstructions and masks
+        recons = decoded[:, :, :self.num_colors, :, :]  # [B, num_slots, num_colors, H, W]
+        masks = decoded[:, :, self.num_colors:, :, :]   # [B, num_slots, 1, H, W]
+        
+        # Normalize masks across slots
+        masks = F.softmax(masks, dim=1)
+        
+        # Combine slots using masks (mixture of slots)
+        recon_combined = (recons * masks).sum(dim=1)  # [B, num_colors, H, W]
+        
+        return recon_combined
 
 
 class SenderAgent(nn.Module):
@@ -710,7 +924,8 @@ class ARCAutoencoder(nn.Module):
                  max_grid_size=30, bottleneck_type='communication', task_type='reconstruction', 
                  num_conv_layers=2, num_classes=None, receiver_gets_input_puzzle=False,
                  use_stop_token=False, stop_token_id=None, lstm_hidden_dim=None,
-                 use_beta_vae=False, beta=4.0):
+                 use_beta_vae=False, beta=4.0,
+                 num_slots=7, slot_dim=64, slot_iterations=3, slot_hidden_dim=128, slot_eps=1e-8):
         super().__init__()
         self.encoder = encoder
         self.bottleneck_type = bottleneck_type
@@ -758,6 +973,28 @@ class ARCAutoencoder(nn.Module):
                 self.decoder_reconstructor = ARCDecoder(encoder.latent_dim, num_colors, hidden_dim, max_grid_size)
             elif task_type == 'puzzle_classification':
                 raise NotImplementedError("Puzzle classification not yet supported in autoencoder mode")
+            else:
+                raise ValueError(f"Unknown task_type: {task_type}")
+        elif bottleneck_type == 'slot_attention':
+            # Slot attention bottleneck
+            # Get feature dimension from encoder's last conv layer
+            feature_dim = encoder.conv_channels[-1]
+            
+            self.slot_attention = SlotAttention(
+                num_slots=num_slots,
+                slot_dim=slot_dim,
+                feature_dim=feature_dim,
+                num_iterations=slot_iterations,
+                hidden_dim=slot_hidden_dim,
+                eps=slot_eps
+            )
+            
+            if task_type == 'reconstruction':
+                self.slot_decoder = SlotDecoder(slot_dim, num_colors, hidden_dim, max_grid_size)
+            elif task_type == 'selection':
+                raise NotImplementedError("Selection task not yet supported with slot_attention bottleneck")
+            elif task_type == 'puzzle_classification':
+                raise NotImplementedError("Puzzle classification not yet supported with slot_attention bottleneck")
             else:
                 raise ValueError(f"Unknown task_type: {task_type}")
         else:
@@ -813,7 +1050,7 @@ class ARCAutoencoder(nn.Module):
                 
                 return logits_list, actual_sizes, messages, message_lengths
                 
-            else:  # autoencoder
+            elif self.bottleneck_type == 'autoencoder':
                 latent = self.encoder(x, sizes=sizes)
                 
                 logits_list = []
@@ -829,6 +1066,36 @@ class ARCAutoencoder(nn.Module):
                     actual_sizes.append((actual_h, actual_w))
                 
                 return logits_list, actual_sizes, None
+            
+            elif self.bottleneck_type == 'slot_attention':
+                # Extract spatial features before pooling
+                spatial_features = self.encoder.get_spatial_features(x, sizes=sizes)
+                # [B, C, H, W]
+                
+                B, C, H, W = spatial_features.shape
+                
+                # Reshape to [B, H*W, C] for slot attention
+                features_flat = spatial_features.permute(0, 2, 3, 1).reshape(B, H * W, C)
+                
+                # Apply slot attention to get slots
+                slots = self.slot_attention(features_flat)  # [B, num_slots, slot_dim]
+                
+                # Decode each sample separately
+                logits_list = []
+                actual_sizes = []
+                
+                for i in range(B):
+                    single_slots = slots[i:i+1]
+                    actual_h, actual_w = sizes[i]
+                    
+                    # Decode slots to reconstruction
+                    logits = self.slot_decoder(single_slots, target_size=(actual_h, actual_w))
+                    
+                    logits_list.append(logits)
+                    actual_sizes.append((actual_h, actual_w))
+                
+                return logits_list, actual_sizes, None
+        
         
         elif self.task_type == 'selection':
             if self.bottleneck_type == 'communication':
@@ -978,6 +1245,67 @@ class ARCAutoencoder(nn.Module):
         total_loss = reconstruction_loss + self.beta * kl_div
         
         return total_loss, kl_div
+    
+    def visualize_slots(self, x, sizes=None):
+        """
+        Visualize slot decomposition (only works with slot_attention bottleneck).
+        
+        Args:
+            x: Input grids [B, H, W]
+            sizes: Optional actual sizes
+            
+        Returns:
+            Dict with:
+                - slots: [B, num_slots, slot_dim]
+                - slot_reconstructions: [B, num_slots, num_colors, H, W]
+                - masks: [B, num_slots, 1, H, W]
+        """
+        if self.bottleneck_type != 'slot_attention':
+            raise ValueError("Slot visualization only available with slot_attention bottleneck")
+        
+        self.eval()
+        with torch.no_grad():
+            # Extract spatial features
+            spatial_features = self.encoder.get_spatial_features(x, sizes=sizes)
+            B, C, H, W = spatial_features.shape
+            
+            # Reshape for slot attention
+            features_flat = spatial_features.permute(0, 2, 3, 1).reshape(B, H * W, C)
+            
+            # Get slots
+            slots = self.slot_attention(features_flat)
+            
+            # Decode each slot separately to get individual reconstructions
+            slots_flat = slots.reshape(B * self.slot_attention.num_slots, self.slot_attention.slot_dim)
+            decoded = self.slot_decoder.decode_slot(slots_flat)
+            
+            # Reshape
+            num_slots = self.slot_attention.num_slots
+            decoded = decoded.reshape(B, num_slots, self.slot_decoder.num_colors + 1,
+                                    decoded.shape[-2], decoded.shape[-1])
+            
+            # Resize if needed
+            actual_h, actual_w = sizes[0] if sizes is not None else (H, W)
+            if actual_h != decoded.shape[-2] or actual_w != decoded.shape[-1]:
+                decoded = F.interpolate(
+                    decoded.reshape(B * num_slots, self.slot_decoder.num_colors + 1,
+                                  decoded.shape[-2], decoded.shape[-1]),
+                    size=(actual_h, actual_w), mode='bilinear', align_corners=False
+                )
+                decoded = decoded.reshape(B, num_slots, self.slot_decoder.num_colors + 1, 
+                                        actual_h, actual_w)
+            
+            # Split reconstructions and masks
+            slot_recons = decoded[:, :, :self.slot_decoder.num_colors, :, :]
+            masks = decoded[:, :, self.slot_decoder.num_colors:, :, :]
+            masks = F.softmax(masks, dim=1)
+            
+            return {
+                'slots': slots,
+                'slot_reconstructions': slot_recons,
+                'masks': masks
+            }
+
 
 class ARCPuzzleSolver(nn.Module):
     """

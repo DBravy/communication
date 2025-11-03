@@ -217,6 +217,13 @@ def save_full_checkpoint(model, optimizer, epoch, batch, checkpoint_name, traini
         'use_beta_vae': training_state.get('use_beta_vae', False),
         'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
         
+        # Slot Attention configuration
+        'num_slots': training_state.get('num_slots', 7),
+        'slot_dim': training_state.get('slot_dim', 64),
+        'slot_iterations': training_state.get('slot_iterations', 3),
+        'slot_hidden_dim': training_state.get('slot_hidden_dim', 128),
+        'slot_eps': training_state.get('slot_eps', 1e-8),
+        
         # Communication protocol
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
@@ -277,6 +284,12 @@ training_state = {
     # β-VAE configuration
     'use_beta_vae': getattr(config, 'USE_BETA_VAE', False),
     'beta_vae_beta': getattr(config, 'BETA_VAE_BETA', 4.0),
+    # Slot Attention configuration
+    'num_slots': getattr(config, 'NUM_SLOTS', 7),
+    'slot_dim': getattr(config, 'SLOT_DIM', 64),
+    'slot_iterations': getattr(config, 'SLOT_ITERATIONS', 3),
+    'slot_hidden_dim': getattr(config, 'SLOT_HIDDEN_DIM', 128),
+    'slot_eps': getattr(config, 'SLOT_EPS', 1e-8),
     # Communication protocol
     'vocab_size': getattr(config, 'VOCAB_SIZE', 100),
     'max_message_length': getattr(config, 'MAX_MESSAGE_LENGTH', 3),
@@ -1353,7 +1366,14 @@ def train_worker():
             receiver_gets_input_puzzle=receiver_gets_input_puzzle,
             use_stop_token=use_stop_token,
             stop_token_id=stop_token_id,
-            lstm_hidden_dim=training_state.get('lstm_hidden_dim', None)
+            lstm_hidden_dim=training_state.get('lstm_hidden_dim', None),
+            use_beta_vae=training_state.get('use_beta_vae', False),
+            beta=training_state.get('beta_vae_beta', 4.0),
+            num_slots=training_state.get('num_slots', 7),
+            slot_dim=training_state.get('slot_dim', 64),
+            slot_iterations=training_state.get('slot_iterations', 3),
+            slot_hidden_dim=training_state.get('slot_hidden_dim', 128),
+            slot_eps=training_state.get('slot_eps', 1e-8)
         ).to(device)
         
         # MAIN TRAINING STEP 2: Optionally freeze encoder weights during main training
@@ -1935,7 +1955,14 @@ def batch_test_worker(puzzle_ids, checkpoint_path, dataset_version, dataset_spli
                     receiver_gets_input_puzzle=checkpoint_receiver_gets_input,
                     use_stop_token=checkpoint_use_stop_token,
                     stop_token_id=stop_token_id,
-                    lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
+                    lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None),
+                    use_beta_vae=getattr(config, 'USE_BETA_VAE', False),
+                    beta=getattr(config, 'BETA_VAE_BETA', 4.0),
+                    num_slots=getattr(config, 'NUM_SLOTS', 7),
+                    slot_dim=getattr(config, 'SLOT_DIM', 64),
+                    slot_iterations=getattr(config, 'SLOT_ITERATIONS', 3),
+                    slot_hidden_dim=getattr(config, 'SLOT_HIDDEN_DIM', 128),
+                    slot_eps=getattr(config, 'SLOT_EPS', 1e-8)
                 ).to(device)
                 
                 # Load checkpoint weights if provided
@@ -2296,7 +2323,14 @@ def finetune_worker(puzzle_id, checkpoint_path, dataset_version, dataset_split, 
             num_conv_layers=getattr(config, 'NUM_CONV_LAYERS', 3),
             receiver_gets_input_puzzle=checkpoint_receiver_gets_input,
             use_stop_token=checkpoint_use_stop_token,
-            stop_token_id=stop_token_id
+            stop_token_id=stop_token_id,
+            use_beta_vae=getattr(config, 'USE_BETA_VAE', False),
+            beta=getattr(config, 'BETA_VAE_BETA', 4.0),
+            num_slots=getattr(config, 'NUM_SLOTS', 7),
+            slot_dim=getattr(config, 'SLOT_DIM', 64),
+            slot_iterations=getattr(config, 'SLOT_ITERATIONS', 3),
+            slot_hidden_dim=getattr(config, 'SLOT_HIDDEN_DIM', 128),
+            slot_eps=getattr(config, 'SLOT_EPS', 1e-8)
         ).to(device)
         
         # Load checkpoint weights if provided
@@ -2716,6 +2750,12 @@ def get_task_config():
         # β-VAE configuration
         'use_beta_vae': training_state.get('use_beta_vae', False),
         'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
+        # Slot Attention configuration
+        'num_slots': training_state.get('num_slots', 7),
+        'slot_dim': training_state.get('slot_dim', 64),
+        'slot_iterations': training_state.get('slot_iterations', 3),
+        'slot_hidden_dim': training_state.get('slot_hidden_dim', 128),
+        'slot_eps': training_state.get('slot_eps', 1e-8),
         # Communication protocol
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
@@ -2819,6 +2859,18 @@ def set_task_config():
     if 'beta_vae_beta' in data:
         training_state['beta_vae_beta'] = float(data['beta_vae_beta'])
     
+    # Slot Attention configuration
+    if 'num_slots' in data:
+        training_state['num_slots'] = int(data['num_slots'])
+    if 'slot_dim' in data:
+        training_state['slot_dim'] = int(data['slot_dim'])
+    if 'slot_iterations' in data:
+        training_state['slot_iterations'] = int(data['slot_iterations'])
+    if 'slot_hidden_dim' in data:
+        training_state['slot_hidden_dim'] = int(data['slot_hidden_dim'])
+    if 'slot_eps' in data:
+        training_state['slot_eps'] = float(data['slot_eps'])
+    
     # Communication protocol
     if 'vocab_size' in data:
         training_state['vocab_size'] = int(data['vocab_size'])
@@ -2897,6 +2949,11 @@ def set_task_config():
         'lstm_hidden_dim': training_state['lstm_hidden_dim'],
         'use_beta_vae': training_state.get('use_beta_vae', False),
         'beta_vae_beta': training_state.get('beta_vae_beta', 4.0),
+        'num_slots': training_state.get('num_slots', 7),
+        'slot_dim': training_state.get('slot_dim', 64),
+        'slot_iterations': training_state.get('slot_iterations', 3),
+        'slot_hidden_dim': training_state.get('slot_hidden_dim', 128),
+        'slot_eps': training_state.get('slot_eps', 1e-8),
         'vocab_size': training_state['vocab_size'],
         'max_message_length': training_state['max_message_length'],
         'temperature': training_state['temperature'],
@@ -3427,7 +3484,14 @@ def solve_puzzle_route():
             receiver_gets_input_puzzle=receiver_gets_input_puzzle,
             use_stop_token=use_stop_token,
             stop_token_id=stop_token_id,
-            lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None)
+            lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None),
+            use_beta_vae=getattr(config, 'USE_BETA_VAE', False),
+            beta=getattr(config, 'BETA_VAE_BETA', 4.0),
+            num_slots=getattr(config, 'NUM_SLOTS', 7),
+            slot_dim=getattr(config, 'SLOT_DIM', 64),
+            slot_iterations=getattr(config, 'SLOT_ITERATIONS', 3),
+            slot_hidden_dim=getattr(config, 'SLOT_HIDDEN_DIM', 128),
+            slot_eps=getattr(config, 'SLOT_EPS', 1e-8)
         ).to(device)
         
         # Load checkpoint with mapping for selection task checkpoints

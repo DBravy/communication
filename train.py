@@ -1926,7 +1926,13 @@ def main():
         stop_token_id=stop_token_id,
         lstm_hidden_dim=getattr(config, 'LSTM_HIDDEN_DIM', None),
         use_beta_vae=getattr(config, 'USE_BETA_VAE', False),
-        beta=getattr(config, 'BETA_VAE_BETA', 4.0)
+        beta=getattr(config, 'BETA_VAE_BETA', 4.0),
+        # Slot attention parameters
+        num_slots=getattr(config, 'NUM_SLOTS', 7),
+        slot_dim=getattr(config, 'SLOT_DIM', 64),
+        slot_iterations=getattr(config, 'SLOT_ITERATIONS', 3),
+        slot_hidden_dim=getattr(config, 'SLOT_HIDDEN_DIM', 128),
+        slot_eps=getattr(config, 'SLOT_EPS', 1e-8)
     ).to(device)
     
     # Freeze encoder if configured
@@ -1975,6 +1981,9 @@ def main():
     print('Starting training...')
     if config.BOTTLENECK_TYPE == 'communication':
         print('Communication bottleneck: grids → discrete symbols → reconstruction')
+    elif config.BOTTLENECK_TYPE == 'slot_attention':
+        print(f'Slot Attention bottleneck: grids → {config.NUM_SLOTS} object slots → reconstruction')
+        print(f'  Slot dimension: {config.SLOT_DIM}, Iterations: {config.SLOT_ITERATIONS}')
     else:
         print('Autoencoder bottleneck: grids → continuous latent → reconstruction')
     print('Decoder/Receiver knows the target size!')
