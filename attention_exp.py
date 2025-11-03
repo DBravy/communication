@@ -5,7 +5,7 @@ Tests combinations of:
 - Slot Dimension: 32, 64, 128
 - Attention Iterations: 1, 3, 5
 
-Each experiment trains for 300 epochs on 100 grids from V1 training,
+Each experiment trains for 300 epochs on 200 grids from V1 (100 from training + 100 from eval),
 testing generalization on V2 training set.
 """
 
@@ -42,22 +42,24 @@ def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, t
     config.SLOT_DIM = slot_dim
     config.SLOT_ITERATIONS = slot_iterations
     config.BOTTLENECK_TYPE = 'slot_attention'
-    config.MAX_GRIDS = 100  # Only use 100 grids
+    config.MAX_GRIDS = 200  # 100 from training + 100 from eval
     config.DATASET_VERSION = 'V1'
-    config.DATASET_SPLIT = 'training'
+    config.DATASET_SPLIT = 'training'  # Note: we actually use both training and eval
     config.GENERALIZATION_TEST_ENABLED = True
     config.GENERALIZATION_TEST_DATASET_VERSION = 'V2'
     config.GENERALIZATION_TEST_DATASET_SPLIT = 'training'
-    config.GENERALIZATION_TEST_MAX_GRIDS = 100  # Use all V2 grids
+    config.GENERALIZATION_TEST_MAX_GRIDS = None  # Use all V2 grids
     config.NUM_EPOCHS = 300
     config.BATCH_SIZE = 32
     config.LEARNING_RATE = 1e-4
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Load V1 training dataset (100 grids)
+    # Load V1 training dataset (100 grids from training + 100 from eval)
     train_data_path = os.path.join('V1', 'data', 'training')
-    train_dataset = ARCDataset(
+    eval_data_path = os.path.join('V1', 'data', 'evaluation')
+    
+    train_dataset_part = ARCDataset(
         train_data_path,
         min_size=config.MIN_GRID_SIZE,
         filter_size=config.FILTER_GRID_SIZE,
@@ -66,6 +68,20 @@ def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, t
         track_puzzle_ids=False,
         use_input_output_pairs=False
     )
+    
+    eval_dataset_part = ARCDataset(
+        eval_data_path,
+        min_size=config.MIN_GRID_SIZE,
+        filter_size=config.FILTER_GRID_SIZE,
+        max_grids=100,
+        num_distractors=0,
+        track_puzzle_ids=False,
+        use_input_output_pairs=False
+    )
+    
+    # Combine both datasets
+    from torch.utils.data import ConcatDataset
+    train_dataset = ConcatDataset([train_dataset_part, eval_dataset_part])
     
     train_loader = DataLoader(
         train_dataset,
@@ -286,7 +302,7 @@ def main():
     print(f"  - Slot Dimension: {slot_dim_values}")
     print(f"  - Attention Iterations: {slot_iterations_values}")
     print(f"\nTraining configuration:")
-    print(f"  - Training set: V1/training (100 grids)")
+    print(f"  - Training set: V1/training (100 grids) + V1/evaluation (100 grids) = 200 total")
     print(f"  - Generalization set: V2/training (all grids)")
     print(f"  - Epochs per experiment: 300")
     print(f"  - Batch size: 32")
