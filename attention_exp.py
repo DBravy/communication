@@ -48,7 +48,7 @@ def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, t
     config.GENERALIZATION_TEST_ENABLED = True
     config.GENERALIZATION_TEST_DATASET_VERSION = 'V2'
     config.GENERALIZATION_TEST_DATASET_SPLIT = 'training'
-    config.GENERALIZATION_TEST_MAX_GRIDS = None  # Use all V2 grids
+    config.GENERALIZATION_TEST_MAX_GRIDS = 100  # Use all V2 grids
     config.NUM_EPOCHS = 300
     config.BATCH_SIZE = 32
     config.LEARNING_RATE = 1e-4
