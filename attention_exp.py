@@ -5,6 +5,7 @@ Tests combinations of:
 - Slot Dimension: 32, 64, 128
 - Attention Iterations: 1, 3, 5
 
+Each configuration is run 3 times to account for training variability.
 Each experiment trains for 300 epochs on 200 grids from V1 (100 from training + 100 from eval),
 testing generalization on V2 training set.
 """
@@ -26,11 +27,11 @@ from dataset import ARCDataset, collate_fn
 from model import ARCEncoder, ARCAutoencoder
 from train import validate
 
-def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, total_experiments):
+def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, total_experiments, run_id=1):
     """Run a single experiment with given hyperparameters."""
     
     print(f"\n{'='*80}")
-    print(f"EXPERIMENT {experiment_id}/{total_experiments}")
+    print(f"EXPERIMENT {experiment_id}/{total_experiments} - Run {run_id}/3")
     print(f"{'='*80}")
     print(f"Num Slots: {num_slots}")
     print(f"Slot Dimension: {slot_dim}")
@@ -269,6 +270,7 @@ def run_single_experiment(num_slots, slot_dim, slot_iterations, experiment_id, t
         'num_slots': num_slots,
         'slot_dim': slot_dim,
         'slot_iterations': slot_iterations,
+        'run_id': run_id,
         'final_train_loss': float(train_losses[-1]),
         'final_train_acc': float(train_accs[-1]),
         'final_gen_loss': float(final_gen_loss),
@@ -287,16 +289,19 @@ def main():
     num_slots_values = [3, 7, 14]
     slot_dim_values = [32, 64, 128]
     slot_iterations_values = [1, 3, 5]
+    num_runs = 3  # Number of times to run each configuration
     
     # Generate all combinations
     experiments = list(itertools.product(num_slots_values, slot_dim_values, slot_iterations_values))
-    total_experiments = len(experiments)
+    total_configurations = len(experiments)
+    total_experiments = total_configurations * num_runs
     
     print(f"{'='*80}")
     print(f"SLOT ATTENTION HYPERPARAMETER TESTING")
     print(f"{'='*80}")
+    print(f"Total configurations: {total_configurations}")
+    print(f"Runs per configuration: {num_runs}")
     print(f"Total experiments: {total_experiments}")
-    print(f"Experiments per slot count: {len(slot_dim_values) * len(slot_iterations_values)}")
     print(f"\nHyperparameter ranges:")
     print(f"  - Number of Slots: {num_slots_values}")
     print(f"  - Slot Dimension: {slot_dim_values}")
@@ -313,28 +318,33 @@ def main():
     results = []
     start_time = time.time()
     
-    for exp_id, (num_slots, slot_dim, slot_iterations) in enumerate(experiments, 1):
-        try:
-            result = run_single_experiment(num_slots, slot_dim, slot_iterations, exp_id, total_experiments)
-            results.append(result)
-            
-            # Save intermediate results after each experiment
-            with open('slot_attention_experiment_results.json', 'w') as f:
-                json.dump({
-                    'completed_experiments': len(results),
-                    'total_experiments': total_experiments,
-                    'results': results,
-                    'timestamp': time.time()
-                }, f, indent=2)
+    exp_count = 0
+    for config_id, (num_slots, slot_dim, slot_iterations) in enumerate(experiments, 1):
+        for run_id in range(1, num_runs + 1):
+            exp_count += 1
+            try:
+                result = run_single_experiment(num_slots, slot_dim, slot_iterations, 
+                                             config_id, total_configurations, run_id)
+                results.append(result)
                 
-        except Exception as e:
-            print(f"\n!!! ERROR in experiment {exp_id}: {e} !!!\n")
-            results.append({
-                'num_slots': num_slots,
-                'slot_dim': slot_dim,
-                'slot_iterations': slot_iterations,
-                'error': str(e)
-            })
+                # Save intermediate results after each experiment
+                with open('slot_attention_experiment_results.json', 'w') as f:
+                    json.dump({
+                        'completed_experiments': len(results),
+                        'total_experiments': total_experiments,
+                        'results': results,
+                        'timestamp': time.time()
+                    }, f, indent=2)
+                    
+            except Exception as e:
+                print(f"\n!!! ERROR in experiment {config_id} run {run_id}: {e} !!!\n")
+                results.append({
+                    'num_slots': num_slots,
+                    'slot_dim': slot_dim,
+                    'slot_iterations': slot_iterations,
+                    'run_id': run_id,
+                    'error': str(e)
+                })
     
     total_time = time.time() - start_time
     
@@ -363,8 +373,40 @@ def main():
 
 def generate_summary_report(results, total_time):
     """Generate a concise summary report of all experiments."""
+    import numpy as np
     
     successful_results = [r for r in results if 'error' not in r]
+    
+    # Group results by configuration
+    config_groups = {}
+    for r in successful_results:
+        key = (r['num_slots'], r['slot_dim'], r['slot_iterations'])
+        if key not in config_groups:
+            config_groups[key] = []
+        config_groups[key].append(r)
+    
+    # Compute statistics for each configuration
+    config_stats = []
+    for (num_slots, slot_dim, slot_iterations), runs in config_groups.items():
+        train_accs = [r['final_train_acc'] for r in runs]
+        gen_accs = [r['final_gen_acc'] for r in runs]
+        train_losses = [r['final_train_loss'] for r in runs]
+        gen_losses = [r['final_gen_loss'] for r in runs]
+        
+        config_stats.append({
+            'num_slots': num_slots,
+            'slot_dim': slot_dim,
+            'slot_iterations': slot_iterations,
+            'num_runs': len(runs),
+            'train_acc_mean': np.mean(train_accs),
+            'train_acc_std': np.std(train_accs),
+            'gen_acc_mean': np.mean(gen_accs),
+            'gen_acc_std': np.std(gen_accs),
+            'train_loss_mean': np.mean(train_losses),
+            'gen_loss_mean': np.mean(gen_losses),
+            'best_gen_acc': max(gen_accs),
+            'worst_gen_acc': min(gen_accs)
+        })
     
     with open('slot_attention_summary.txt', 'w') as f:
         f.write("="*80 + "\n")
@@ -374,88 +416,96 @@ def generate_summary_report(results, total_time):
         f.write(f"Total Experiments: {len(results)}\n")
         f.write(f"Successful: {len(successful_results)}\n")
         f.write(f"Failed: {len(results) - len(successful_results)}\n")
-        f.write(f"Total Runtime: {total_time/3600:.2f} hours\n\n")
+        f.write(f"Total Runtime: {total_time/3600:.2f} hours\n")
+        f.write(f"Configurations tested: {len(config_groups)}\n")
+        f.write(f"Runs per configuration: 3\n\n")
         
         f.write("="*80 + "\n")
-        f.write("RESULTS BY CONFIGURATION\n")
+        f.write("RESULTS BY CONFIGURATION (Averaged across 3 runs)\n")
         f.write("="*80 + "\n\n")
         
-        # Sort results by final generalization accuracy
-        sorted_results = sorted(successful_results, key=lambda x: x['final_gen_acc'], reverse=True)
+        # Sort by mean generalization accuracy
+        sorted_stats = sorted(config_stats, key=lambda x: x['gen_acc_mean'], reverse=True)
         
-        for rank, result in enumerate(sorted_results, 1):
+        for rank, stats in enumerate(sorted_stats, 1):
             f.write(f"Rank #{rank}\n")
             f.write(f"  Configuration:\n")
-            f.write(f"    - Num Slots: {result['num_slots']}\n")
-            f.write(f"    - Slot Dim: {result['slot_dim']}\n")
-            f.write(f"    - Attention Iterations: {result['slot_iterations']}\n")
-            f.write(f"  Performance:\n")
-            f.write(f"    - Final Train Accuracy: {result['final_train_acc']:.2f}%\n")
-            f.write(f"    - Final Gen Accuracy: {result['final_gen_acc']:.2f}%\n")
-            f.write(f"    - Final Train Loss: {result['final_train_loss']:.4f}\n")
-            f.write(f"    - Final Gen Loss: {result['final_gen_loss']:.4f}\n")
-            f.write(f"    - Avg Epoch Time: {result['avg_epoch_time']:.2f}s\n")
-            f.write(f"    - Total Train Time: {result['total_train_time']/60:.2f} min\n")
+            f.write(f"    - Num Slots: {stats['num_slots']}\n")
+            f.write(f"    - Slot Dim: {stats['slot_dim']}\n")
+            f.write(f"    - Attention Iterations: {stats['slot_iterations']}\n")
+            f.write(f"  Performance (mean ± std over {stats['num_runs']} runs):\n")
+            f.write(f"    - Train Accuracy: {stats['train_acc_mean']:.2f}% ± {stats['train_acc_std']:.2f}%\n")
+            f.write(f"    - Gen Accuracy: {stats['gen_acc_mean']:.2f}% ± {stats['gen_acc_std']:.2f}%\n")
+            f.write(f"    - Best Gen Acc: {stats['best_gen_acc']:.2f}%\n")
+            f.write(f"    - Worst Gen Acc: {stats['worst_gen_acc']:.2f}%\n")
+            f.write(f"    - Train Loss: {stats['train_loss_mean']:.4f}\n")
+            f.write(f"    - Gen Loss: {stats['gen_loss_mean']:.4f}\n")
             f.write("\n")
         
         # Analysis by parameter
         f.write("="*80 + "\n")
-        f.write("ANALYSIS BY PARAMETER\n")
+        f.write("ANALYSIS BY PARAMETER (Averaged across all runs)\n")
         f.write("="*80 + "\n\n")
         
         # Group by number of slots
         f.write("By Number of Slots:\n")
         f.write("-" * 40 + "\n")
         for num_slots in [3, 7, 14]:
-            slot_results = [r for r in successful_results if r['num_slots'] == num_slots]
-            if slot_results:
-                avg_gen_acc = sum(r['final_gen_acc'] for r in slot_results) / len(slot_results)
-                best_gen_acc = max(r['final_gen_acc'] for r in slot_results)
-                f.write(f"  {num_slots} slots: Avg Gen Acc = {avg_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
+            slot_stats = [s for s in config_stats if s['num_slots'] == num_slots]
+            if slot_stats:
+                avg_gen_acc = np.mean([s['gen_acc_mean'] for s in slot_stats])
+                std_gen_acc = np.std([s['gen_acc_mean'] for s in slot_stats])
+                best_gen_acc = max(s['best_gen_acc'] for s in slot_stats)
+                f.write(f"  {num_slots} slots: Avg Gen Acc = {avg_gen_acc:.2f}% ± {std_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
         f.write("\n")
         
         # Group by slot dimension
         f.write("By Slot Dimension:\n")
         f.write("-" * 40 + "\n")
         for slot_dim in [32, 64, 128]:
-            dim_results = [r for r in successful_results if r['slot_dim'] == slot_dim]
-            if dim_results:
-                avg_gen_acc = sum(r['final_gen_acc'] for r in dim_results) / len(dim_results)
-                best_gen_acc = max(r['final_gen_acc'] for r in dim_results)
-                f.write(f"  {slot_dim} dim: Avg Gen Acc = {avg_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
+            dim_stats = [s for s in config_stats if s['slot_dim'] == slot_dim]
+            if dim_stats:
+                avg_gen_acc = np.mean([s['gen_acc_mean'] for s in dim_stats])
+                std_gen_acc = np.std([s['gen_acc_mean'] for s in dim_stats])
+                best_gen_acc = max(s['best_gen_acc'] for s in dim_stats)
+                f.write(f"  {slot_dim} dim: Avg Gen Acc = {avg_gen_acc:.2f}% ± {std_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
         f.write("\n")
         
         # Group by attention iterations
         f.write("By Attention Iterations:\n")
         f.write("-" * 40 + "\n")
         for iterations in [1, 3, 5]:
-            iter_results = [r for r in successful_results if r['slot_iterations'] == iterations]
-            if iter_results:
-                avg_gen_acc = sum(r['final_gen_acc'] for r in iter_results) / len(iter_results)
-                best_gen_acc = max(r['final_gen_acc'] for r in iter_results)
-                f.write(f"  {iterations} iterations: Avg Gen Acc = {avg_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
+            iter_stats = [s for s in config_stats if s['slot_iterations'] == iterations]
+            if iter_stats:
+                avg_gen_acc = np.mean([s['gen_acc_mean'] for s in iter_stats])
+                std_gen_acc = np.std([s['gen_acc_mean'] for s in iter_stats])
+                best_gen_acc = max(s['best_gen_acc'] for s in iter_stats)
+                f.write(f"  {iterations} iterations: Avg Gen Acc = {avg_gen_acc:.2f}% ± {std_gen_acc:.2f}%, Best = {best_gen_acc:.2f}%\n")
         f.write("\n")
         
         # Best configuration
         f.write("="*80 + "\n")
-        f.write("BEST CONFIGURATION\n")
+        f.write("BEST CONFIGURATION (by mean performance)\n")
         f.write("="*80 + "\n\n")
         
-        if sorted_results:
-            best = sorted_results[0]
+        if sorted_stats:
+            best = sorted_stats[0]
             f.write(f"Configuration:\n")
             f.write(f"  - Num Slots: {best['num_slots']}\n")
             f.write(f"  - Slot Dim: {best['slot_dim']}\n")
             f.write(f"  - Attention Iterations: {best['slot_iterations']}\n\n")
-            f.write(f"Performance:\n")
-            f.write(f"  - Final Train Accuracy: {best['final_train_acc']:.2f}%\n")
-            f.write(f"  - Final Gen Accuracy: {best['final_gen_acc']:.2f}%\n")
-            f.write(f"  - Improvement over training: {best['final_gen_acc'] - best['final_train_acc']:.2f}%\n\n")
+            f.write(f"Performance (mean ± std over {best['num_runs']} runs):\n")
+            f.write(f"  - Train Accuracy: {best['train_acc_mean']:.2f}% ± {best['train_acc_std']:.2f}%\n")
+            f.write(f"  - Gen Accuracy: {best['gen_acc_mean']:.2f}% ± {best['gen_acc_std']:.2f}%\n")
+            f.write(f"  - Best Gen Acc across runs: {best['best_gen_acc']:.2f}%\n")
+            f.write(f"  - Worst Gen Acc across runs: {best['worst_gen_acc']:.2f}%\n")
+            f.write(f"  - Mean improvement over training: {best['gen_acc_mean'] - best['train_acc_mean']:.2f}%\n\n")
             
-            # Show generalization progress
-            f.write(f"Generalization Accuracy Progress (every 20 epochs):\n")
-            for i, acc in enumerate(best['gen_acc_history'], 1):
-                f.write(f"  Epoch {i*20}: {acc:.2f}%\n")
+            # Show individual runs for best configuration
+            f.write(f"Individual runs for best configuration:\n")
+            best_config_runs = config_groups[(best['num_slots'], best['slot_dim'], best['slot_iterations'])]
+            for i, run in enumerate(sorted(best_config_runs, key=lambda x: x['final_gen_acc'], reverse=True), 1):
+                f.write(f"  Run {run['run_id']}: Train Acc = {run['final_train_acc']:.2f}%, Gen Acc = {run['final_gen_acc']:.2f}%\n")
         
         f.write("\n" + "="*80 + "\n")
 
