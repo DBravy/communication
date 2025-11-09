@@ -1,8 +1,54 @@
-node_modules/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Environment
 .env
+.env.local
+
+# Logs
 *.log
-.pt
-.pth
 
+# Model files and checkpoints
+*.pt
+*.pth
+checkpoints/
+puzzle_checkpoints/
+*.pkl
+*.h5
+*.onnx
 
+# Data directories (keep structure, not content)
+V1/data/
+V2/data/
+
+# Generated files
+*.png
+*.jpg
+*.jpeg
+diagnostics/
+learning_dynamics.png
+*.json
+!package.json
+!tsconfig.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Node (if applicable)
+node_modules/
