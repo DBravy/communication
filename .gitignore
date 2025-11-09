@@ -3,6 +3,6 @@ node_modules/
 *.log
 .pt
 .pth
-.md
-*.md
+
+
 .DS_Store
