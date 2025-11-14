@@ -6,6 +6,10 @@ A PyTorch implementation exploring emergent communication protocols for abstract
 
 This work is inspired by the paper [**Emergence of Language with Multi-agent Games: Learning to Communicate with Sequences of Symbols**](https://arxiv.org/abs/1705.11192) by Havrylov & Titov (NIPS 2017). The paper demonstrates how agents can learn compositional communication protocols from scratch using differentiable relaxations (Gumbel-softmax).
 
+### Key Difference from the Paper
+
+One notable difference from the original paper is that **we did not use a pre-trained encoder**. Despite this, we found that agents were still able to successfully develop emergent languages and communication protocols, at least within the ARC Grid paradigm. This suggests that pre-training may not be necessary for learning effective symbolic communication in visually grounded tasks with sufficient structure.
+
 ## Overview
 
 The system trains two neural agents (sender and receiver) to develop a communication protocol for describing abstract grid patterns. The sender views a grid and generates a discrete symbolic message. The receiver must use this message to identify the correct grid from a large set of distractors.
