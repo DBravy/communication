@@ -8,7 +8,7 @@ This work is inspired by the paper [**Emergence of Language with Multi-agent Gam
 
 ### Key Difference from the Paper
 
-One notable difference from the original paper is that **we did not use a pre-trained encoder**. Despite this, we found that agents were still able to successfully develop emergent languages and communication protocols, at least within the ARC Grid paradigm. This suggests that pre-training may not be necessary for learning effective symbolic communication in visually grounded tasks with sufficient structure.
+One notable difference from the original paper is that **we did not use a pre-trained encoder**. Despite this, we found that agents were still able to successfully develop emergent languages and communication protocols, at least within the ARC grid paradigm. This suggests that pre-training may not be necessary for learning effective symbolic communication in visually grounded tasks with sufficient structure.
 
 ## Overview
 
