@@ -26,8 +26,8 @@ puzzle_checkpoints/
 *.onnx
 
 # Data directories (keep structure, not content)
-V1/data/
-V2/data/
+# V1/data/
+# V2/data/
 
 # Generated files
 *.png
