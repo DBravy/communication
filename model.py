@@ -351,12 +351,17 @@ class SlotDecoder(nn.Module):
     Decoder for slot attention that reconstructs the grid from slots.
     Each slot is decoded independently and combined via broadcasting.
     """
-    def __init__(self, slot_dim, num_colors, hidden_dim, max_grid_size=30):
+    def __init__(self, slot_dim, num_colors, hidden_dim, max_grid_size=30, num_slots=7):
         super().__init__()
         self.slot_dim = slot_dim
         self.num_colors = num_colors
         self.hidden_dim = hidden_dim
         self.max_grid_size = max_grid_size
+        self.num_slots = num_slots
+        
+        # Learned positional encodings for each slot
+        # These give each slot position-specific information during decoding
+        self.slot_pos_encoding = nn.Parameter(torch.randn(num_slots, slot_dim))
         
         # Decode each slot to a spatial feature map
         self.fc_decode = nn.Linear(slot_dim, hidden_dim * 4 * 4)
@@ -407,6 +412,11 @@ class SlotDecoder(nn.Module):
         """
         B, num_slots, slot_dim = slots.shape
         H, W = target_size
+        
+        # Add learned positional encodings to slots
+        # Expand positional encodings for batch: [num_slots, slot_dim] -> [B, num_slots, slot_dim]
+        pos_encodings = self.slot_pos_encoding.unsqueeze(0).expand(B, -1, -1)
+        slots = slots + pos_encodings  # Add positional information to each slot
         
         # Decode all slots
         slots_flat = slots.reshape(B * num_slots, slot_dim)
@@ -990,7 +1000,7 @@ class ARCAutoencoder(nn.Module):
             )
             
             if task_type == 'reconstruction':
-                self.slot_decoder = SlotDecoder(slot_dim, num_colors, hidden_dim, max_grid_size)
+                self.slot_decoder = SlotDecoder(slot_dim, num_colors, hidden_dim, max_grid_size, num_slots=num_slots)
             elif task_type == 'selection':
                 raise NotImplementedError("Selection task not yet supported with slot_attention bottleneck")
             elif task_type == 'puzzle_classification':
