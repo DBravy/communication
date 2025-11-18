@@ -262,13 +262,21 @@ class SlotAttention(nn.Module):
     Based on "Object-Centric Learning with Slot Attention" (Locatello et al., 2020).
     Learns to decompose input features into a fixed number of slots through iterative attention.
     """
-    def __init__(self, num_slots, slot_dim, feature_dim, num_iterations=3, hidden_dim=128, eps=1e-8):
+    def __init__(self, num_slots, slot_dim, feature_dim, num_iterations=3, hidden_dim=128, eps=1e-8, max_spatial_size=30):
         super().__init__()
         self.num_slots = num_slots
         self.slot_dim = slot_dim
         self.feature_dim = feature_dim
         self.num_iterations = num_iterations
         self.eps = eps
+        self.max_spatial_size = max_spatial_size
+        
+        # Learned 2D spatial positional encodings
+        # These will be added to input features to give spatial awareness
+        # Shape: [1, max_spatial_size, max_spatial_size, feature_dim]
+        self.spatial_pos_encoding = nn.Parameter(
+            torch.randn(1, max_spatial_size, max_spatial_size, feature_dim) * 0.02
+        )
         
         # Learned slot initialization parameters
         self.slots_mu = nn.Parameter(torch.randn(1, 1, slot_dim))
@@ -292,15 +300,36 @@ class SlotAttention(nn.Module):
             nn.Linear(hidden_dim, slot_dim)
         )
         
-    def forward(self, inputs):
+    def forward(self, inputs, spatial_size=None):
         """
         Args:
             inputs: Feature maps [B, H*W, feature_dim] or [B, num_features, feature_dim]
+            spatial_size: Optional tuple (H, W) indicating spatial dimensions of the features.
+                         If None, assumes square grid and computes from input size.
             
         Returns:
             slots: [B, num_slots, slot_dim]
         """
         B, N, D = inputs.shape
+        
+        # Determine spatial dimensions
+        if spatial_size is not None:
+            H, W = spatial_size
+        else:
+            # Assume square grid
+            H = W = int(N ** 0.5)
+            assert H * W == N, f"Cannot infer spatial size from N={N}, provide spatial_size parameter"
+        
+        # Reshape inputs to spatial format [B, H, W, D]
+        inputs_spatial = inputs.reshape(B, H, W, D)
+        
+        # Add learned spatial positional encodings
+        # Extract the relevant portion of positional encodings for the actual spatial size
+        pos_enc = self.spatial_pos_encoding[:, :H, :W, :]  # [1, H, W, feature_dim]
+        inputs_spatial = inputs_spatial + pos_enc  # Broadcasting across batch dimension
+        
+        # Reshape back to [B, N, D]
+        inputs = inputs_spatial.reshape(B, N, D)
         
         # Initialize slots from learned distribution
         mu = self.slots_mu.expand(B, self.num_slots, -1)
@@ -996,7 +1025,8 @@ class ARCAutoencoder(nn.Module):
                 feature_dim=feature_dim,
                 num_iterations=slot_iterations,
                 hidden_dim=slot_hidden_dim,
-                eps=slot_eps
+                eps=slot_eps,
+                max_spatial_size=max_grid_size
             )
             
             if task_type == 'reconstruction':
@@ -1087,8 +1117,8 @@ class ARCAutoencoder(nn.Module):
                 # Reshape to [B, H*W, C] for slot attention
                 features_flat = spatial_features.permute(0, 2, 3, 1).reshape(B, H * W, C)
                 
-                # Apply slot attention to get slots
-                slots = self.slot_attention(features_flat)  # [B, num_slots, slot_dim]
+                # Apply slot attention to get slots (pass spatial dimensions for positional encoding)
+                slots = self.slot_attention(features_flat, spatial_size=(H, W))  # [B, num_slots, slot_dim]
                 
                 # Decode each sample separately
                 logits_list = []
