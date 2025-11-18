@@ -950,6 +950,9 @@
                 <button class="btn-save-checkpoint" id="saveCheckpointBtn" onclick="saveCheckpoint()" disabled style="background: #8b5cf6; color: white;">
                     💾 Save Checkpoint
                 </button>
+                <button class="btn-pause-viz" id="pauseVizBtn" onclick="toggleVisualizationPause()" disabled style="background: #f59e0b; color: white;">
+                    ⏸️ Pause Visualization
+                </button>
             </div>
             
             <div class="status-display">
@@ -1013,10 +1016,29 @@
         </div>
 
         <div class="results-section" id="resultsSection">
-            <h2 class="section-title" id="resultsTitle">Live Results</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 class="section-title" id="resultsTitle" style="margin: 0;">Live Results</h2>
+                <div id="vizPausedIndicator" style="display: none; background: #fef3c7; color: #92400e; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid #fcd34d;">
+                    ⏸️ Visualization Paused
+                </div>
+            </div>
             <div class="results-grid" id="resultsContainer">
                 <div style="text-align: center; color: #6b7280; grid-column: 1 / -1;">
                     Start main training to see results...
+                </div>
+            </div>
+        </div>
+
+        <div class="results-section" id="slotAttentionSection" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 class="section-title" style="margin: 0;">Slot Attention Segmentation</h2>
+                <div id="vizPausedIndicatorSlot" style="display: none; background: #fef3c7; color: #92400e; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid #fcd34d;">
+                    ⏸️ Visualization Paused
+                </div>
+            </div>
+            <div id="slotAttentionContainer" style="padding: 20px;">
+                <div style="text-align: center; color: #6b7280;">
+                    Training with slot attention to see live segmentation...
                 </div>
             </div>
         </div>
@@ -1031,6 +1053,7 @@
         let currentMode = null;
         let currentTaskType = 'reconstruction';
         let configDirty = false;
+        let visualizationPaused = false;  // Track if visualization updates are paused
         // Performance controls for long-running sessions (no sliding window)
         const MAX_POINTS = 10000;          // Hard cap on points kept per chart (older points are decimated)
         const CHART_UPDATE_MS = 200;       // Throttle chart renders to at most ~5 FPS
@@ -1518,6 +1541,166 @@
             });
         }
         
+        function displaySlotAttention(data, epoch, batch) {
+            // Show the section
+            const section = document.getElementById('slotAttentionSection');
+            section.style.display = 'block';
+            
+            const container = document.getElementById('slotAttentionContainer');
+            container.innerHTML = '';
+            
+            const accuracyColor = data.accuracy > 80 ? '#10b981' : 
+                                  data.accuracy > 50 ? '#f59e0b' : '#ef4444';
+            
+            // Add epoch/batch info if available
+            const epochBatchInfo = (epoch !== undefined && batch !== undefined) ? 
+                `Epoch ${epoch} / Batch ${batch}` : '';
+            
+            // Create main container
+            const vizDiv = document.createElement('div');
+            vizDiv.style.cssText = 'background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);';
+            
+            // Header with info
+            vizDiv.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                        <span style="font-weight: 600; font-size: 16px;">Slot Attention Segmentation</span>
+                        <span style="background: ${accuracyColor}; color: white; padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 600;">
+                            ${data.accuracy.toFixed(1)}% Accurate
+                        </span>
+                        <span style="background: #e0e7ff; color: #4c51bf; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 500;">
+                            ${data.num_slots} Slots
+                        </span>
+                    </div>
+                    <span style="font-size: 11px; color: #9ca3af;">${epochBatchInfo}</span>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 13px; color: #6b7280; margin-bottom: 8px; text-align: center;">
+                            Input Grid (${data.actual_size[0]}×${data.actual_size[1]})
+                        </div>
+                        <div id="slot-input" style="text-align: center;"></div>
+                    </div>
+                    <div>
+                        <div style="font-weight: 600; font-size: 13px; color: #6b7280; margin-bottom: 8px; text-align: center;">
+                            Reconstruction
+                        </div>
+                        <div id="slot-recon" style="text-align: center;"></div>
+                    </div>
+                </div>
+                
+                <div style="border-top: 2px solid #e5e7eb; padding-top: 15px; margin-top: 15px;">
+                    <div style="font-weight: 600; font-size: 14px; color: #4c51bf; margin-bottom: 12px;">
+                        Individual Slot Segmentations
+                    </div>
+                    <div id="slots-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;"></div>
+                </div>
+            `;
+            
+            container.appendChild(vizDiv);
+            
+            // Render input and reconstruction
+            setTimeout(() => {
+                renderGrid(data.input, 'slot-input');
+                renderGrid(data.reconstruction, 'slot-recon');
+                
+                // Render each slot
+                const slotsGrid = document.getElementById('slots-grid');
+                data.slots.forEach((slot, idx) => {
+                    const slotDiv = document.createElement('div');
+                    slotDiv.style.cssText = 'background: #f9fafb; border-radius: 6px; padding: 10px; border: 1px solid #e5e7eb;';
+                    
+                    slotDiv.innerHTML = `
+                        <div style="font-weight: 600; font-size: 12px; color: #6b7280; margin-bottom: 8px; text-align: center;">
+                            Slot ${idx + 1}
+                            <span style="font-size: 10px; color: #9ca3af;">(avg: ${slot.mask_mean.toFixed(3)})</span>
+                        </div>
+                        <div style="margin-bottom: 8px;">
+                            <div style="font-size: 10px; color: #9ca3af; margin-bottom: 4px; text-align: center;">Attention Mask</div>
+                            <div id="slot-mask-${idx}" style="text-align: center;"></div>
+                        </div>
+                        <div>
+                            <div style="font-size: 10px; color: #9ca3af; margin-bottom: 4px; text-align: center;">Reconstruction</div>
+                            <div id="slot-recon-${idx}" style="text-align: center;"></div>
+                        </div>
+                    `;
+                    
+                    slotsGrid.appendChild(slotDiv);
+                    
+                    // Render mask as heatmap
+                    setTimeout(() => {
+                        renderHeatmap(slot.mask, `slot-mask-${idx}`);
+                        renderGrid(slot.reconstruction, `slot-recon-${idx}`);
+                    }, 0);
+                });
+            }, 0);
+        }
+        
+        function renderHeatmap(mask, containerId) {
+            // Render attention mask as a colored heatmap
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const canvas = document.createElement('canvas');
+            const cellSize = 15;
+            const h = mask.length;
+            const w = mask[0].length;
+            
+            canvas.width = w * cellSize;
+            canvas.height = h * cellSize;
+            canvas.style.imageRendering = 'pixelated';
+            canvas.style.maxWidth = '100%';
+            canvas.style.height = 'auto';
+            
+            const ctx = canvas.getContext('2d');
+            
+            for (let i = 0; i < h; i++) {
+                for (let j = 0; j < w; j++) {
+                    const value = mask[i][j];
+                    // Hot colormap: black -> red -> yellow -> white
+                    let r, g, b;
+                    if (value < 0.33) {
+                        const t = value / 0.33;
+                        r = Math.floor(255 * t);
+                        g = 0;
+                        b = 0;
+                    } else if (value < 0.66) {
+                        const t = (value - 0.33) / 0.33;
+                        r = 255;
+                        g = Math.floor(255 * t);
+                        b = 0;
+                    } else {
+                        const t = (value - 0.66) / 0.34;
+                        r = 255;
+                        g = 255;
+                        b = Math.floor(255 * t);
+                    }
+                    
+                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                    ctx.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+                }
+            }
+            
+            // Add grid lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= h; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, i * cellSize);
+                ctx.lineTo(w * cellSize, i * cellSize);
+                ctx.stroke();
+            }
+            for (let j = 0; j <= w; j++) {
+                ctx.beginPath();
+                ctx.moveTo(j * cellSize, 0);
+                ctx.lineTo(j * cellSize, h * cellSize);
+                ctx.stroke();
+            }
+            
+            container.appendChild(canvas);
+        }
+        
         function displaySelections(selections, epoch, batch) {
             const container = document.getElementById('resultsContainer');
             container.innerHTML = '';
@@ -1854,6 +2037,7 @@
                         document.getElementById('trainBtn').disabled = true;
                         document.getElementById('stopBtn').disabled = false;
                         document.getElementById('saveCheckpointBtn').disabled = true;  // Disabled during pretraining
+                        document.getElementById('pauseVizBtn').disabled = false;  // Enable pause visualization button
                         document.getElementById('statusText').textContent = 'Running';
                         document.getElementById('statusIndicator').className = 'status-indicator status-pretraining';
                         document.getElementById('modeBadge').className = 'mode-badge mode-pretrain';
@@ -1892,6 +2076,7 @@
                         document.getElementById('trainBtn').disabled = true;
                         document.getElementById('stopBtn').disabled = false;
                         document.getElementById('saveCheckpointBtn').disabled = false;  // Enabled during main training
+                        document.getElementById('pauseVizBtn').disabled = false;  // Enable pause visualization button
                         document.getElementById('statusText').textContent = 'Running';
                         document.getElementById('statusIndicator').className = 'status-indicator status-running';
                         document.getElementById('modeBadge').className = 'mode-badge mode-train';
@@ -1921,13 +2106,46 @@
                         document.getElementById('trainBtn').disabled = false;
                         document.getElementById('stopBtn').disabled = true;
                         document.getElementById('saveCheckpointBtn').disabled = true;
+                        document.getElementById('pauseVizBtn').disabled = true;
                         document.getElementById('statusText').textContent = 'Stopped';
                         document.getElementById('statusIndicator').className = 'status-indicator status-stopped';
                         document.getElementById('modeBadge').className = 'mode-badge hidden';
                         currentMode = null;
+                        // Reset visualization pause state
+                        visualizationPaused = false;
+                        updatePauseVizButton();
                     }
                 })
                 .catch(error => console.error('Error:', error));
+        }
+        
+        function toggleVisualizationPause() {
+            visualizationPaused = !visualizationPaused;
+            updatePauseVizButton();
+            
+            // Show notification
+            const message = visualizationPaused 
+                ? '⏸️ Visualization paused (training continues)' 
+                : '▶️ Visualization resumed';
+            showNotification(message, visualizationPaused ? 'warning' : 'success');
+        }
+        
+        function updatePauseVizButton() {
+            const btn = document.getElementById('pauseVizBtn');
+            const indicator = document.getElementById('vizPausedIndicator');
+            const indicatorSlot = document.getElementById('vizPausedIndicatorSlot');
+            
+            if (visualizationPaused) {
+                btn.innerHTML = '▶️ Resume Visualization';
+                btn.style.background = '#10b981';  // Green
+                indicator.style.display = 'block';
+                indicatorSlot.style.display = 'block';
+            } else {
+                btn.innerHTML = '⏸️ Pause Visualization';
+                btn.style.background = '#f59e0b';  // Orange
+                indicator.style.display = 'none';
+                indicatorSlot.style.display = 'none';
+            }
         }
         
         function showNotification(message, type = 'success') {
@@ -2041,7 +2259,17 @@
             }
             
             if (message.type === 'reconstructions') {
-                displayResults(message.data, message.epoch, message.batch);
+                // Only update visualization if not paused
+                if (!visualizationPaused) {
+                    displayResults(message.data, message.epoch, message.batch);
+                }
+            }
+            
+            if (message.type === 'slot_attention') {
+                // Only update visualization if not paused
+                if (!visualizationPaused) {
+                    displaySlotAttention(message.data, message.epoch, message.batch);
+                }
             }
         };
         

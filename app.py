@@ -330,6 +330,7 @@ training_state = {
 training_thread = None
 metrics_queue = queue.Queue()
 reconstructions_queue = queue.Queue()
+slot_attention_queue = queue.Queue()  # Queue for slot attention visualizations
 stop_flag = threading.Event()
 status_queue = queue.Queue()
 save_checkpoint_queue = queue.Queue()  # Queue for checkpoint save requests
@@ -608,6 +609,80 @@ def get_reconstructions(model, grids, sizes, device, num_samples=1):
     
     model.train()
     return reconstructions
+
+def get_slot_attention_visualization(model, grids, sizes, device):
+    """Get slot attention visualization data - shows how slots segment the input."""
+    global training_state
+    model.eval()
+    
+    with torch.no_grad():
+        # Only works if model has slot attention
+        if not hasattr(model, 'visualize_slots'):
+            return None
+        
+        # Rotate through samples in the batch
+        batch_size = grids.shape[0]
+        i = training_state['viz_sample_idx'] % batch_size
+        training_state['viz_sample_idx'] += 1
+        
+        grid = grids[i]
+        actual_h, actual_w = sizes[i]
+        input_grid = grid[:actual_h, :actual_w].cpu().numpy()
+        
+        # Get reconstruction for accuracy
+        single_grid = grid.unsqueeze(0)
+        model_output = model(single_grid, [(actual_h, actual_w)])
+        logits_list = model_output[0]  # First element is always logits
+        recon_logits = logits_list[0].squeeze(0)
+        recon_grid = recon_logits.argmax(dim=0).cpu().numpy()
+        
+        # Calculate accuracy
+        min_h = min(actual_h, recon_grid.shape[0])
+        min_w = min(actual_w, recon_grid.shape[1])
+        correct_pixels = (input_grid[:min_h, :min_w] == recon_grid[:min_h, :min_w]).sum()
+        total_pixels = min_h * min_w
+        accuracy = 100.0 * correct_pixels / total_pixels if total_pixels > 0 else 0.0
+        
+        # Get slot visualization
+        slot_vis = model.visualize_slots(single_grid, sizes=[(actual_h, actual_w)])
+        slots = slot_vis['slots']  # [1, num_slots, slot_dim]
+        slot_recons = slot_vis['slot_reconstructions']  # [1, num_slots, num_colors, H, W]
+        masks = slot_vis['masks']  # [1, num_slots, 1, H, W]
+        
+        num_slots = slots.shape[1]
+        
+        # Extract and crop to actual size
+        slot_recons = slot_recons[0]  # [num_slots, num_colors, H, W]
+        masks = masks[0, :, 0, :, :]  # [num_slots, H, W]
+        
+        # Crop to actual size and convert to lists for JSON
+        masks_cropped = masks[:, :actual_h, :actual_w].cpu().numpy()
+        slot_recons_cropped = slot_recons[:, :, :actual_h, :actual_w].argmax(dim=1).cpu().numpy()
+        
+        # Convert to lists for JSON serialization
+        slot_data = []
+        for slot_idx in range(num_slots):
+            mask = masks_cropped[slot_idx]
+            slot_recon = slot_recons_cropped[slot_idx]
+            mask_mean = float(mask.mean())
+            
+            slot_data.append({
+                'mask': mask.tolist(),
+                'reconstruction': slot_recon.tolist(),
+                'mask_mean': mask_mean
+            })
+        
+        result = {
+            'input': input_grid.tolist(),
+            'reconstruction': recon_grid[:actual_h, :actual_w].tolist(),
+            'slots': slot_data,
+            'actual_size': [int(actual_h), int(actual_w)],
+            'accuracy': float(accuracy),
+            'num_slots': num_slots
+        }
+    
+    model.train()
+    return result
 
 def get_classification_preview(model, grids, sizes, device):
     """Get classification preview data for visualization - rotates through different samples."""
@@ -1689,6 +1764,17 @@ def train_worker():
                         'epoch': epoch + 1,
                         'batch': 'end'  # Indicate this is end-of-epoch visualization
                     })
+                    
+                    # Generate slot attention visualization if using slot attention
+                    if training_state.get('bottleneck_type') == 'slot_attention':
+                        slot_viz = get_slot_attention_visualization(model, val_input_grids, val_input_sizes, device)
+                        if slot_viz is not None:
+                            slot_attention_queue.put({
+                                'data': slot_viz,
+                                'epoch': epoch + 1,
+                                'batch': 'end'
+                            })
+                    
                     break  # Only use first validation batch
             
             # Run generalization test every N epochs
@@ -2588,6 +2674,8 @@ def start_pretrain():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
+    while not slot_attention_queue.empty():
+        slot_attention_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
     while not save_checkpoint_queue.empty():
@@ -2647,6 +2735,8 @@ def start_train():
         metrics_queue.get()
     while not reconstructions_queue.empty():
         reconstructions_queue.get()
+    while not slot_attention_queue.empty():
+        slot_attention_queue.get()
     while not status_queue.empty():  # NEW
         status_queue.get()
     while not save_checkpoint_queue.empty():
@@ -3121,6 +3211,13 @@ def stream():
                 else:
                     # Legacy format for backwards compatibility
                     yield f"data: {json.dumps({'type': 'reconstructions', 'data': recons_data})}\n\n"
+            except queue.Empty:
+                pass
+            
+            # Check for slot attention visualizations
+            try:
+                slot_data = slot_attention_queue.get_nowait()
+                yield f"data: {json.dumps({'type': 'slot_attention', 'data': slot_data['data'], 'epoch': slot_data.get('epoch'), 'batch': slot_data.get('batch')})}\n\n"
             except queue.Empty:
                 pass
             

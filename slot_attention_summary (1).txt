@@ -1,0 +1,410 @@
+================================================================================
+SLOT ATTENTION HYPERPARAMETER TESTING - SUMMARY REPORT
+================================================================================
+
+Total Experiments: 81
+Successful: 81
+Failed: 0
+Total Runtime: 12.90 hours
+Configurations tested: 27
+Runs per configuration: 3
+
+================================================================================
+RESULTS BY CONFIGURATION (Averaged across 3 runs)
+================================================================================
+
+Rank #1
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 128
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.04% ± 0.95%
+    - Gen Accuracy: 48.86% ± 1.96%
+    - Best Gen Acc: 50.72%
+    - Worst Gen Acc: 46.15%
+    - Train Loss: 0.0250
+    - Gen Loss: 4.4697
+
+Rank #2
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 32
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 87.91% ± 0.83%
+    - Gen Accuracy: 48.83% ± 1.61%
+    - Best Gen Acc: 51.06%
+    - Worst Gen Acc: 47.29%
+    - Train Loss: 0.1241
+    - Gen Loss: 3.9497
+
+Rank #3
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 128
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 97.47% ± 0.87%
+    - Gen Accuracy: 48.52% ± 2.16%
+    - Best Gen Acc: 51.53%
+    - Worst Gen Acc: 46.55%
+    - Train Loss: 0.0341
+    - Gen Loss: 2.9823
+
+Rank #4
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 64
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.20% ± 0.10%
+    - Gen Accuracy: 48.46% ± 4.21%
+    - Best Gen Acc: 53.13%
+    - Worst Gen Acc: 42.93%
+    - Train Loss: 0.0223
+    - Gen Loss: 2.7784
+
+Rank #5
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 64
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 95.46% ± 1.71%
+    - Gen Accuracy: 48.06% ± 0.79%
+    - Best Gen Acc: 49.12%
+    - Worst Gen Acc: 47.23%
+    - Train Loss: 0.0596
+    - Gen Loss: 2.7846
+
+Rank #6
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 128
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 96.80% ± 1.55%
+    - Gen Accuracy: 47.86% ± 1.22%
+    - Best Gen Acc: 49.14%
+    - Worst Gen Acc: 46.22%
+    - Train Loss: 0.0471
+    - Gen Loss: 3.2287
+
+Rank #7
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 64
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 96.27% ± 0.93%
+    - Gen Accuracy: 47.56% ± 3.20%
+    - Best Gen Acc: 51.87%
+    - Worst Gen Acc: 44.19%
+    - Train Loss: 0.0468
+    - Gen Loss: 4.2115
+
+Rank #8
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 32
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 96.60% ± 0.97%
+    - Gen Accuracy: 47.56% ± 1.31%
+    - Best Gen Acc: 48.89%
+    - Worst Gen Acc: 45.77%
+    - Train Loss: 0.0418
+    - Gen Loss: 2.8379
+
+Rank #9
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 64
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 92.87% ± 3.87%
+    - Gen Accuracy: 47.22% ± 0.92%
+    - Best Gen Acc: 48.46%
+    - Worst Gen Acc: 46.28%
+    - Train Loss: 0.0886
+    - Gen Loss: 4.3135
+
+Rank #10
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 128
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 95.70% ± 1.05%
+    - Gen Accuracy: 47.15% ± 4.78%
+    - Best Gen Acc: 51.29%
+    - Worst Gen Acc: 40.46%
+    - Train Loss: 0.0606
+    - Gen Loss: 3.9512
+
+Rank #11
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 32
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 92.71% ± 3.71%
+    - Gen Accuracy: 46.50% ± 1.07%
+    - Best Gen Acc: 48.01%
+    - Worst Gen Acc: 45.66%
+    - Train Loss: 0.0957
+    - Gen Loss: 4.6194
+
+Rank #12
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 128
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.35% ± 0.52%
+    - Gen Accuracy: 46.33% ± 5.27%
+    - Best Gen Acc: 53.77%
+    - Worst Gen Acc: 42.60%
+    - Train Loss: 0.0227
+    - Gen Loss: 4.3414
+
+Rank #13
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 128
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 93.91% ± 2.86%
+    - Gen Accuracy: 46.06% ± 3.37%
+    - Best Gen Acc: 50.82%
+    - Worst Gen Acc: 43.44%
+    - Train Loss: 0.1389
+    - Gen Loss: 3.4189
+
+Rank #14
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 64
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.10% ± 0.07%
+    - Gen Accuracy: 45.87% ± 3.66%
+    - Best Gen Acc: 49.90%
+    - Worst Gen Acc: 41.04%
+    - Train Loss: 0.0251
+    - Gen Loss: 2.6478
+
+Rank #15
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 32
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 92.67% ± 4.65%
+    - Gen Accuracy: 45.57% ± 4.11%
+    - Best Gen Acc: 50.24%
+    - Worst Gen Acc: 40.24%
+    - Train Loss: 0.1372
+    - Gen Loss: 3.5313
+
+Rank #16
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 64
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 90.27% ± 3.27%
+    - Gen Accuracy: 45.18% ± 1.06%
+    - Best Gen Acc: 46.65%
+    - Worst Gen Acc: 44.18%
+    - Train Loss: 0.1139
+    - Gen Loss: 3.0081
+
+Rank #17
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 64
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 97.68% ± 0.13%
+    - Gen Accuracy: 44.49% ± 6.06%
+    - Best Gen Acc: 49.80%
+    - Worst Gen Acc: 36.01%
+    - Train Loss: 0.0476
+    - Gen Loss: 3.4255
+
+Rank #18
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 32
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 88.39% ± 6.53%
+    - Gen Accuracy: 44.24% ± 1.75%
+    - Best Gen Acc: 45.87%
+    - Worst Gen Acc: 41.82%
+    - Train Loss: 0.1544
+    - Gen Loss: 3.3456
+
+Rank #19
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 32
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 92.38% ± 2.76%
+    - Gen Accuracy: 43.04% ± 8.96%
+    - Best Gen Acc: 49.58%
+    - Worst Gen Acc: 30.37%
+    - Train Loss: 0.0975
+    - Gen Loss: 3.8100
+
+Rank #20
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 128
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.68% ± 0.30%
+    - Gen Accuracy: 42.84% ± 8.32%
+    - Best Gen Acc: 53.84%
+    - Worst Gen Acc: 33.72%
+    - Train Loss: 0.0169
+    - Gen Loss: 3.3050
+
+Rank #21
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 128
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 96.68% ± 0.60%
+    - Gen Accuracy: 42.47% ± 1.95%
+    - Best Gen Acc: 44.96%
+    - Worst Gen Acc: 40.21%
+    - Train Loss: 0.0628
+    - Gen Loss: 2.9120
+
+Rank #22
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 128
+    - Attention Iterations: 3
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.68% ± 0.27%
+    - Gen Accuracy: 42.37% ± 6.91%
+    - Best Gen Acc: 50.44%
+    - Worst Gen Acc: 33.57%
+    - Train Loss: 0.0170
+    - Gen Loss: 3.2853
+
+Rank #23
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 64
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 94.70% ± 1.90%
+    - Gen Accuracy: 42.13% ± 1.51%
+    - Best Gen Acc: 44.10%
+    - Worst Gen Acc: 40.44%
+    - Train Loss: 0.0675
+    - Gen Loss: 3.7604
+
+Rank #24
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 32
+    - Attention Iterations: 1
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 83.37% ± 0.89%
+    - Gen Accuracy: 42.02% ± 1.89%
+    - Best Gen Acc: 44.60%
+    - Worst Gen Acc: 40.10%
+    - Train Loss: 0.1869
+    - Gen Loss: 3.2433
+
+Rank #25
+  Configuration:
+    - Num Slots: 7
+    - Slot Dim: 64
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.18% ± 0.05%
+    - Gen Accuracy: 39.89% ± 7.34%
+    - Best Gen Acc: 46.61%
+    - Worst Gen Acc: 29.67%
+    - Train Loss: 0.0250
+    - Gen Loss: 3.7645
+
+Rank #26
+  Configuration:
+    - Num Slots: 14
+    - Slot Dim: 32
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 98.28% ± 0.14%
+    - Gen Accuracy: 38.27% ± 10.41%
+    - Best Gen Acc: 47.31%
+    - Worst Gen Acc: 23.69%
+    - Train Loss: 0.0275
+    - Gen Loss: 4.7326
+
+Rank #27
+  Configuration:
+    - Num Slots: 3
+    - Slot Dim: 32
+    - Attention Iterations: 5
+  Performance (mean ± std over 3 runs):
+    - Train Accuracy: 87.08% ± 1.10%
+    - Gen Accuracy: 37.26% ± 5.35%
+    - Best Gen Acc: 44.16%
+    - Worst Gen Acc: 31.11%
+    - Train Loss: 0.1286
+    - Gen Loss: 3.6509
+
+================================================================================
+ANALYSIS BY PARAMETER (Averaged across all runs)
+================================================================================
+
+By Number of Slots:
+----------------------------------------
+  3 slots: Avg Gen Acc = 44.26% ± 3.40%, Best = 51.29%
+  7 slots: Avg Gen Acc = 46.17% ± 2.62%, Best = 53.77%
+  14 slots: Avg Gen Acc = 44.53% ± 3.10%, Best = 53.84%
+
+By Slot Dimension:
+----------------------------------------
+  32 dim: Avg Gen Acc = 43.70% ± 3.76%, Best = 51.06%
+  64 dim: Avg Gen Acc = 45.43% ± 2.72%, Best = 53.13%
+  128 dim: Avg Gen Acc = 45.83% ± 2.47%, Best = 53.84%
+
+By Attention Iterations:
+----------------------------------------
+  1 iterations: Avg Gen Acc = 45.60% ± 2.34%, Best = 51.53%
+  3 iterations: Avg Gen Acc = 46.28% ± 2.13%, Best = 53.77%
+  5 iterations: Avg Gen Acc = 43.07% ± 3.80%, Best = 53.84%
+
+================================================================================
+BEST CONFIGURATION (by mean performance)
+================================================================================
+
+Configuration:
+  - Num Slots: 7
+  - Slot Dim: 128
+  - Attention Iterations: 5
+
+Performance (mean ± std over 3 runs):
+  - Train Accuracy: 98.04% ± 0.95%
+  - Gen Accuracy: 48.86% ± 1.96%
+  - Best Gen Acc across runs: 50.72%
+  - Worst Gen Acc across runs: 46.15%
+  - Mean improvement over training: -49.18%
+
+Individual runs for best configuration:
+  Run 1: Train Acc = 98.43%, Gen Acc = 50.72%
+  Run 3: Train Acc = 96.73%, Gen Acc = 49.71%
+  Run 2: Train Acc = 98.97%, Gen Acc = 46.15%
+
+================================================================================
