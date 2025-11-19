@@ -2116,6 +2116,9 @@ def main():
                     'latent_dim': config.LATENT_DIM,
                     'num_conv_layers': config.NUM_CONV_LAYERS,
                 }
+                # Save conv_channels if specified
+                if hasattr(config, 'ENCODER_CONV_CHANNELS') and config.ENCODER_CONV_CHANNELS is not None:
+                    checkpoint_data['conv_channels'] = config.ENCODER_CONV_CHANNELS
                 # Add slot attention config if using slot attention
                 if config.BOTTLENECK_TYPE == 'slot_attention':
                     checkpoint_data.update({
@@ -2142,6 +2145,9 @@ def main():
                     'latent_dim': config.LATENT_DIM,
                     'num_conv_layers': config.NUM_CONV_LAYERS,
                 }
+                # Save conv_channels if specified
+                if hasattr(config, 'ENCODER_CONV_CHANNELS') and config.ENCODER_CONV_CHANNELS is not None:
+                    checkpoint_data['conv_channels'] = config.ENCODER_CONV_CHANNELS
                 # Add slot attention config if using slot attention
                 if config.BOTTLENECK_TYPE == 'slot_attention':
                     checkpoint_data.update({

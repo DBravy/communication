@@ -2212,6 +2212,19 @@
                 
                 if (data.status === 'checkpoint_saved') {
                     showNotification(`✓ Checkpoint saved: ${data.checkpoint_name} (Epoch ${data.epoch}, Batch ${data.batch})`, 'success');
+                    
+                    // Trigger download of the checkpoint file
+                    const filename = data.checkpoint_name.endsWith('.pth') ? data.checkpoint_name : data.checkpoint_name + '.pth';
+                    const downloadUrl = `/download_checkpoint/${encodeURIComponent(filename)}`;
+                    
+                    // Create a temporary link and trigger download
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    
                     return;
                 }
                 

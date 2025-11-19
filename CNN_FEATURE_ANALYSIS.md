@@ -182,3 +182,4 @@ Look for:
 
 **Bottom Line**: Your CNN architecture is sound, but **dying ReLU neurons** are crippling your feature extraction. Fix the activation sparsity issue, and your slot attention will likely perform much better.
 
+

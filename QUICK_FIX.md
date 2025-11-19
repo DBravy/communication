@@ -151,3 +151,4 @@ GELU has smooth gradients everywhere and is less prone to neuron death.
 
 **This should resolve 80% of your slot attention issues.**
 
+

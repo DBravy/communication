@@ -1,6 +1,6 @@
 """Flask web server for ARC training control and monitoring with pretraining support."""
 
-from flask import Flask, render_template, jsonify, Response, request
+from flask import Flask, render_template, jsonify, Response, request, send_file
 import threading
 import queue
 import json
@@ -3129,6 +3129,30 @@ def request_checkpoint_save():
         'checkpoint_name': checkpoint_name,
         'message': f'Checkpoint save requested: {checkpoint_name}'
     })
+
+
+@app.route('/download_checkpoint/<filename>', methods=['GET'])
+def download_checkpoint(filename):
+    """Download a checkpoint file."""
+    # Sanitize filename to prevent directory traversal
+    safe_filename = os.path.basename(filename)
+    if not safe_filename.endswith('.pth'):
+        safe_filename += '.pth'
+    
+    checkpoint_path = os.path.join(config.SAVE_DIR, safe_filename)
+    
+    if not os.path.exists(checkpoint_path):
+        return jsonify({'error': 'Checkpoint file not found'}), 404
+    
+    try:
+        return send_file(
+            checkpoint_path,
+            as_attachment=True,
+            download_name=safe_filename,
+            mimetype='application/octet-stream'
+        )
+    except Exception as e:
+        return jsonify({'error': f'Failed to download checkpoint: {str(e)}'}), 500
 
 
 @app.route('/list_checkpoints', methods=['GET'])

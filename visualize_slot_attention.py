@@ -39,7 +39,7 @@ ARC_COLORS = [
 ]
 
 
-def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iterations=None):
+def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iterations=None, conv_channels=None):
     """Load the trained slot attention model.
     
     Args:
@@ -48,6 +48,7 @@ def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iter
         num_slots: Override number of slots (None = use config or checkpoint value)
         slot_dim: Override slot dimension (None = use config or checkpoint value)
         slot_iterations: Override slot iterations (None = use config or checkpoint value)
+        conv_channels: Override conv channels (None = use checkpoint or hidden_dim)
     """
     
     # Load checkpoint first to check for stored config
@@ -59,7 +60,7 @@ def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iter
     if isinstance(checkpoint, dict):
         # Look for config keys in checkpoint
         for key in ['num_slots', 'slot_dim', 'slot_iterations', 'slot_hidden_dim', 'slot_eps',
-                    'hidden_dim', 'latent_dim', 'num_conv_layers']:
+                    'hidden_dim', 'latent_dim', 'num_conv_layers', 'conv_channels']:
             if key in checkpoint:
                 ckpt_config[key] = checkpoint[key]
         
@@ -78,6 +79,20 @@ def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iter
     final_hidden_dim = ckpt_config.get('hidden_dim', config.HIDDEN_DIM)
     final_latent_dim = ckpt_config.get('latent_dim', config.LATENT_DIM)
     final_num_conv_layers = ckpt_config.get('num_conv_layers', config.NUM_CONV_LAYERS)
+    final_conv_channels = conv_channels if conv_channels is not None else ckpt_config.get('conv_channels', None)
+    
+    # If conv_channels not specified, try to infer from state dict
+    if final_conv_channels is None and isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+        inferred_channels = []
+        for i in range(final_num_conv_layers):
+            key = f'encoder.conv_layers.{i}.weight'
+            if key in state_dict:
+                # Conv weight shape is [out_channels, in_channels, kernel_h, kernel_w]
+                inferred_channels.append(state_dict[key].shape[0])
+        if len(inferred_channels) == final_num_conv_layers:
+            final_conv_channels = inferred_channels
+            print(f"  Inferred conv_channels from state dict: {final_conv_channels}")
     
     print(f"\nUsing configuration:")
     print(f"  num_slots: {final_num_slots}")
@@ -87,6 +102,7 @@ def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iter
     print(f"  hidden_dim: {final_hidden_dim}")
     print(f"  latent_dim: {final_latent_dim}")
     print(f"  num_conv_layers: {final_num_conv_layers}")
+    print(f"  conv_channels: {final_conv_channels if final_conv_channels else 'using hidden_dim'}")
     
     # Create encoder with extracted config
     encoder = ARCEncoder(
@@ -95,6 +111,7 @@ def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iter
         hidden_dim=final_hidden_dim,
         latent_dim=final_latent_dim,
         num_conv_layers=final_num_conv_layers,
+        conv_channels=final_conv_channels,  # This will use hidden_dim if None
         use_beta_vae=config.USE_BETA_VAE
     )
     
@@ -323,7 +340,7 @@ def main():
     """Main function to visualize slot attention on ARC grids."""
     
     # Configuration
-    checkpoint_path = 'checkpoints/slot_attention_32.pth'
+    checkpoint_path = 'checkpoints/slot_attention_322.pth'
     output_dir = 'slot_attention_visualizations'
     num_grids = 10  # Number of grids to visualize
     
@@ -332,6 +349,7 @@ def main():
     override_num_slots = None  # e.g., 32 if checkpoint has 32 slots
     override_slot_dim = None   # e.g., 64 if checkpoint has 64D slots
     override_slot_iterations = None  # e.g., 3 for 3 iterations
+    override_conv_channels = None  # e.g., [32, 32, 32] for 3 layers with 32 channels each
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -351,7 +369,8 @@ def main():
         model = load_model(checkpoint_path, device, 
                           num_slots=override_num_slots,
                           slot_dim=override_slot_dim,
-                          slot_iterations=override_slot_iterations)
+                          slot_iterations=override_slot_iterations,
+                          conv_channels=override_conv_channels)
         print(f"\n✓ Model loaded successfully!")
         print(f"✓ Configuration: {config.NUM_SLOTS} slots, {config.SLOT_DIM}D, {config.SLOT_ITERATIONS} iterations")
     except Exception as e:
