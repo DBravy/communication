@@ -39,16 +39,62 @@ ARC_COLORS = [
 ]
 
 
-def load_model(checkpoint_path, device):
-    """Load the trained slot attention model."""
+def load_model(checkpoint_path, device, num_slots=None, slot_dim=None, slot_iterations=None):
+    """Load the trained slot attention model.
     
-    # Create encoder
+    Args:
+        checkpoint_path: Path to checkpoint file
+        device: torch device
+        num_slots: Override number of slots (None = use config or checkpoint value)
+        slot_dim: Override slot dimension (None = use config or checkpoint value)
+        slot_iterations: Override slot iterations (None = use config or checkpoint value)
+    """
+    
+    # Load checkpoint first to check for stored config
+    print(f"Loading checkpoint from: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Extract configuration from checkpoint if available
+    ckpt_config = {}
+    if isinstance(checkpoint, dict):
+        # Look for config keys in checkpoint
+        for key in ['num_slots', 'slot_dim', 'slot_iterations', 'slot_hidden_dim', 'slot_eps',
+                    'hidden_dim', 'latent_dim', 'num_conv_layers']:
+            if key in checkpoint:
+                ckpt_config[key] = checkpoint[key]
+        
+        print(f"\nCheckpoint info:")
+        print(f"  Epoch: {checkpoint.get('epoch', 'unknown')}")
+        print(f"  Bottleneck type: {checkpoint.get('bottleneck_type', 'unknown')}")
+        if ckpt_config:
+            print(f"  Config from checkpoint: {ckpt_config}")
+    
+    # Determine final configuration (priority: function args > checkpoint > config.py)
+    final_num_slots = num_slots if num_slots is not None else ckpt_config.get('num_slots', config.NUM_SLOTS)
+    final_slot_dim = slot_dim if slot_dim is not None else ckpt_config.get('slot_dim', config.SLOT_DIM)
+    final_slot_iterations = slot_iterations if slot_iterations is not None else ckpt_config.get('slot_iterations', config.SLOT_ITERATIONS)
+    final_slot_hidden_dim = ckpt_config.get('slot_hidden_dim', config.SLOT_HIDDEN_DIM)
+    final_slot_eps = ckpt_config.get('slot_eps', config.SLOT_EPS)
+    final_hidden_dim = ckpt_config.get('hidden_dim', config.HIDDEN_DIM)
+    final_latent_dim = ckpt_config.get('latent_dim', config.LATENT_DIM)
+    final_num_conv_layers = ckpt_config.get('num_conv_layers', config.NUM_CONV_LAYERS)
+    
+    print(f"\nUsing configuration:")
+    print(f"  num_slots: {final_num_slots}")
+    print(f"  slot_dim: {final_slot_dim}")
+    print(f"  slot_iterations: {final_slot_iterations}")
+    print(f"  slot_hidden_dim: {final_slot_hidden_dim}")
+    print(f"  hidden_dim: {final_hidden_dim}")
+    print(f"  latent_dim: {final_latent_dim}")
+    print(f"  num_conv_layers: {final_num_conv_layers}")
+    
+    # Create encoder with extracted config
     encoder = ARCEncoder(
         num_colors=config.NUM_COLORS,
         embedding_dim=config.EMBEDDING_DIM,
-        hidden_dim=config.HIDDEN_DIM,
-        latent_dim=config.LATENT_DIM,
-        num_conv_layers=config.NUM_CONV_LAYERS,
+        hidden_dim=final_hidden_dim,
+        latent_dim=final_latent_dim,
+        num_conv_layers=final_num_conv_layers,
         use_beta_vae=config.USE_BETA_VAE
     )
     
@@ -59,35 +105,48 @@ def load_model(checkpoint_path, device):
         max_length=config.MAX_MESSAGE_LENGTH,
         num_colors=config.NUM_COLORS,
         embedding_dim=config.EMBEDDING_DIM,
-        hidden_dim=config.HIDDEN_DIM,
+        hidden_dim=final_hidden_dim,
         max_grid_size=config.MAX_GRID_SIZE,
         bottleneck_type='slot_attention',  # Force slot attention
         task_type='reconstruction',
-        num_conv_layers=config.NUM_CONV_LAYERS,
+        num_conv_layers=final_num_conv_layers,
         use_beta_vae=config.USE_BETA_VAE,
         beta=config.BETA_VAE_BETA,
-        num_slots=config.NUM_SLOTS,
-        slot_dim=config.SLOT_DIM,
-        slot_iterations=config.SLOT_ITERATIONS,
-        slot_hidden_dim=config.SLOT_HIDDEN_DIM,
-        slot_eps=config.SLOT_EPS
+        num_slots=final_num_slots,
+        slot_dim=final_slot_dim,
+        slot_iterations=final_slot_iterations,
+        slot_hidden_dim=final_slot_hidden_dim,
+        slot_eps=final_slot_eps
     ).to(device)
     
-    # Load checkpoint
-    print(f"Loading checkpoint from: {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # Handle different checkpoint formats
-    if isinstance(checkpoint, dict):
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-            print(f"Loaded checkpoint from epoch {checkpoint.get('epoch', 'unknown')}")
+    # Load state dict
+    try:
+        if isinstance(checkpoint, dict):
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                print(f"\n✓ Successfully loaded model state dict")
+            else:
+                model.load_state_dict(checkpoint)
+                print(f"\n✓ Successfully loaded checkpoint as state dict")
         else:
             model.load_state_dict(checkpoint)
-    else:
-        model.load_state_dict(checkpoint)
+            print(f"\n✓ Successfully loaded checkpoint")
+    except Exception as e:
+        print(f"\n⚠️  Error loading checkpoint: {e}")
+        print("This might be due to architecture mismatch. Try adjusting num_slots, slot_dim, or other parameters.")
+        raise
     
     model.eval()
+    
+    # Update config module with actual values for use in visualization
+    config.NUM_SLOTS = final_num_slots
+    config.SLOT_DIM = final_slot_dim
+    config.SLOT_ITERATIONS = final_slot_iterations
+    config.SLOT_HIDDEN_DIM = final_slot_hidden_dim
+    config.HIDDEN_DIM = final_hidden_dim
+    config.LATENT_DIM = final_latent_dim
+    config.NUM_CONV_LAYERS = final_num_conv_layers
+    
     return model
 
 
@@ -264,9 +323,15 @@ def main():
     """Main function to visualize slot attention on ARC grids."""
     
     # Configuration
-    checkpoint_path = 'checkpoints/slot_attention.pth'
+    checkpoint_path = 'checkpoints/slot_attention_32.pth'
     output_dir = 'slot_attention_visualizations'
     num_grids = 10  # Number of grids to visualize
+    
+    # Optional: Override config parameters here if needed
+    # Set to None to auto-detect from checkpoint or use config.py values
+    override_num_slots = None  # e.g., 32 if checkpoint has 32 slots
+    override_slot_dim = None   # e.g., 64 if checkpoint has 64D slots
+    override_slot_iterations = None  # e.g., 3 for 3 iterations
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -274,16 +339,28 @@ def main():
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    print(f"\nCheckpoint: {checkpoint_path}")
     
     # Load model
     if not os.path.exists(checkpoint_path):
-        print(f"ERROR: Checkpoint not found at {checkpoint_path}")
+        print(f"\nERROR: Checkpoint not found at {checkpoint_path}")
         print("Please ensure the checkpoint file exists.")
         return
     
-    model = load_model(checkpoint_path, device)
-    print(f"Model loaded successfully!")
-    print(f"Configuration: {config.NUM_SLOTS} slots, {config.SLOT_DIM}D, {config.SLOT_ITERATIONS} iterations")
+    try:
+        model = load_model(checkpoint_path, device, 
+                          num_slots=override_num_slots,
+                          slot_dim=override_slot_dim,
+                          slot_iterations=override_slot_iterations)
+        print(f"\n✓ Model loaded successfully!")
+        print(f"✓ Configuration: {config.NUM_SLOTS} slots, {config.SLOT_DIM}D, {config.SLOT_ITERATIONS} iterations")
+    except Exception as e:
+        print(f"\n✗ Failed to load model: {e}")
+        print("\nTroubleshooting:")
+        print("1. Check if the checkpoint was saved with different config parameters")
+        print("2. Try setting override parameters manually in main() function")
+        print("3. Common mismatches: num_slots, slot_dim, hidden_dim, latent_dim")
+        return
     
     # Load dataset
     # Use the same dataset configuration as training

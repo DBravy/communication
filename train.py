@@ -2103,7 +2103,7 @@ def main():
             # Save best model
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                torch.save({
+                checkpoint_data = {
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'encoder_state_dict': encoder.state_dict(),
@@ -2111,19 +2111,47 @@ def main():
                     'val_loss': val_loss,
                     'val_acc': val_acc,
                     'bottleneck_type': config.BOTTLENECK_TYPE,
-                }, os.path.join(config.SAVE_DIR, 'best_model.pth'))
+                    # Save model architecture config for easy loading
+                    'hidden_dim': config.HIDDEN_DIM,
+                    'latent_dim': config.LATENT_DIM,
+                    'num_conv_layers': config.NUM_CONV_LAYERS,
+                }
+                # Add slot attention config if using slot attention
+                if config.BOTTLENECK_TYPE == 'slot_attention':
+                    checkpoint_data.update({
+                        'num_slots': config.NUM_SLOTS,
+                        'slot_dim': config.SLOT_DIM,
+                        'slot_iterations': config.SLOT_ITERATIONS,
+                        'slot_hidden_dim': config.SLOT_HIDDEN_DIM,
+                        'slot_eps': config.SLOT_EPS,
+                    })
+                torch.save(checkpoint_data, os.path.join(config.SAVE_DIR, 'best_model.pth'))
                 print('✓ Saved best model')
             
             # Save checkpoint every 10 epochs (keep only last 3 to save disk space)
             if (epoch + 1) % 10 == 0:
                 checkpoint_path = os.path.join(config.SAVE_DIR, f'checkpoint_epoch_{epoch+1}.pth')
-                torch.save({
+                checkpoint_data = {
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'encoder_state_dict': encoder.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'bottleneck_type': config.BOTTLENECK_TYPE,
-                }, checkpoint_path)
+                    # Save model architecture config for easy loading
+                    'hidden_dim': config.HIDDEN_DIM,
+                    'latent_dim': config.LATENT_DIM,
+                    'num_conv_layers': config.NUM_CONV_LAYERS,
+                }
+                # Add slot attention config if using slot attention
+                if config.BOTTLENECK_TYPE == 'slot_attention':
+                    checkpoint_data.update({
+                        'num_slots': config.NUM_SLOTS,
+                        'slot_dim': config.SLOT_DIM,
+                        'slot_iterations': config.SLOT_ITERATIONS,
+                        'slot_hidden_dim': config.SLOT_HIDDEN_DIM,
+                        'slot_eps': config.SLOT_EPS,
+                    })
+                torch.save(checkpoint_data, checkpoint_path)
                 
                 # Clean up old checkpoints
                 keep_last = getattr(config, 'KEEP_LAST_CHECKPOINTS', 3)
